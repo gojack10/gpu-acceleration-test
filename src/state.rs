@@ -1,14 +1,14 @@
 use anyhow::Result;
 use glam::{Mat4, Quat, Vec3};
-use std::{sync::Arc, time::{Duration, Instant}};
+use std::{sync::Arc, time::Instant};
 use wgpu::util::DeviceExt;
 use winit::{
     dpi::PhysicalSize,
-    event::{ElementState, WindowEvent},
+    event::WindowEvent,
     window::Window,
 };
-use egui::{Color32, TextStyle};
-use log::{debug, info, warn};
+use egui::{};
+use log::debug;
 
 // For egui_wgpu_backend
 use egui_wgpu_backend::{RenderPass, ScreenDescriptor};

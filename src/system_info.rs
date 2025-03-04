@@ -1,4 +1,4 @@
-use sysinfo::{Cpu, CpuRefreshKind, RefreshKind, System};
+use sysinfo::{CpuRefreshKind, RefreshKind, System};
 use crate::render_device::RenderDevice;
 
 #[derive(Clone)]
@@ -7,6 +7,16 @@ pub struct SystemInfo {
     pub gpus: Vec<String>,
     pub selected_cpu: usize,
     pub selected_gpu: usize,
+}
+
+impl SystemInfo {
+    pub fn get_render_device(&self) -> RenderDevice {
+        if self.selected_gpu == 0 || self.gpus.is_empty() {
+            RenderDevice::CPU
+        } else {
+            RenderDevice::GPU(self.gpus[self.selected_gpu].clone())
+        }
+    }
 }
 
 pub fn get_system_info(instance: &wgpu::Instance) -> SystemInfo {

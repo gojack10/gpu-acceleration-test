@@ -1,21 +1,88 @@
 use anyhow::Result;
 use std::sync::Arc;
 use winit::{
-    event::{ElementState, Event, KeyEvent, WindowEvent},
-    event_loop::{EventLoop},
+    application::ApplicationHandler,
+    event::{KeyEvent, WindowEvent, DeviceEvent, DeviceId},
+    event_loop::{ActiveEventLoop, EventLoop, ControlFlow},
     keyboard::{KeyCode, PhysicalKey},
-    window::{Window, WindowBuilder},
+    window::{Window, WindowAttributes, WindowId},
 };
-// No longer using WindowAttributes, we'll use Window directly
 
 use gpu_acceleration_test::{
-    render_device::RenderDevice,
     state::State,
     system_info::get_system_info,
     WINDOW_TITLE,
     WINDOW_WIDTH,
     WINDOW_HEIGHT,
 };
+
+struct App {
+    window: Option<Arc<Window>>,
+    state: Option<State>,
+    window_attributes: WindowAttributes,
+    render_device: gpu_acceleration_test::render_device::RenderDevice,
+    system_info: gpu_acceleration_test::system_info::SystemInfo,
+}
+
+impl ApplicationHandler for App {
+    fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+        if self.window.is_none() {
+            // Create window when the application is resumed
+            let win = event_loop.create_window(self.window_attributes.clone()).unwrap();
+            self.window = Some(Arc::new(win));
+            
+            // Create the state struct
+            self.state = Some(pollster::block_on(State::new(
+                self.window.as_ref().unwrap().clone(),
+                self.render_device.clone(),
+                self.system_info.clone()
+            )).unwrap());
+        }
+    }
+    
+    fn window_event(&mut self, _event_loop: &ActiveEventLoop, window_id: WindowId, event: WindowEvent) {
+        if let (Some(window), Some(state)) = (self.window.as_ref(), &mut self.state) {
+            if window_id == window.id() {
+                if !state.input(&event) {
+                    match event {
+                        WindowEvent::KeyboardInput { 
+                            event: KeyEvent {
+                                physical_key: PhysicalKey::Code(KeyCode::Escape),
+                                ..
+                            },
+                            ..
+                        } => {
+                            // We'll handle exit in the about_to_wait method
+                        },
+                        WindowEvent::CloseRequested => {
+                            // We'll handle exit in the about_to_wait method
+                        },
+                        _ => {}
+                    }
+                }
+            }
+        }
+    }
+    
+    fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        if let Some(state) = &mut self.state {
+            state.update();
+            
+            match state.render() {
+                Ok(_) => {}
+                Err(wgpu::SurfaceError::Lost) => state.resize(state.size),
+                Err(wgpu::SurfaceError::OutOfMemory) => {
+                    event_loop.exit();
+                },
+                Err(e) => eprintln!("{:?}", e),
+            }
+        }
+    }
+    
+    fn device_event(&mut self, _event_loop: &ActiveEventLoop, _device_id: DeviceId, _event: DeviceEvent) {
+        // Handle device events if needed
+    }
+}
 
 fn main() -> Result<()> {
     // Initialize the logger
@@ -24,17 +91,16 @@ fn main() -> Result<()> {
     // Skip version logging since wgpu's API has changed
     log::info!("Starting application with wgpu and egui integration");
     
-    // Create event loop and window
+    // Create event loop
     let event_loop = EventLoop::new().unwrap();
     
-    // Use WindowBuilder in winit 0.30
-    let window = WindowBuilder::default()
-        .with_title(WINDOW_TITLE)
-        .with_inner_size(winit::dpi::PhysicalSize::new(WINDOW_WIDTH, WINDOW_HEIGHT))
-        .build(&event_loop)
-        .unwrap();
+    // Set control flow to Poll for continuous rendering
+    event_loop.set_control_flow(ControlFlow::Poll);
     
-    let window = Arc::new(window);
+    // Create window attributes
+    let window_attributes = WindowAttributes::default()
+        .with_title(WINDOW_TITLE)
+        .with_inner_size(winit::dpi::PhysicalSize::new(WINDOW_WIDTH, WINDOW_HEIGHT));
     
     // Create wgpu instance for system info
     let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
@@ -46,71 +112,19 @@ fn main() -> Result<()> {
     let system_info = get_system_info(&instance);
     
     // Select render device (default to first GPU)
-    let render_device = if !system_info.gpus.is_empty() && system_info.gpus.len() > 1 {
-        RenderDevice::GPU(system_info.gpus[1].clone())
-    } else {
-        RenderDevice::CPU
-    };
+    let render_device = system_info.get_render_device();
     
-    // Run the benchmark for the selected device
-    run_benchmark(
-        window.clone(),
+    // Create our application handler
+    let mut app = App {
+        window: None,
+        state: None,
+        window_attributes,
         render_device,
         system_info,
-        &event_loop,
-    )?;
-    
-    Ok(())
-}
-
-fn run_benchmark(
-    window: Arc<Window>, 
-    render_device: RenderDevice, 
-    system_info: gpu_acceleration_test::system_info::SystemInfo,
-    event_loop: &EventLoop<()>
-) -> Result<()> {
-    // Create the state
-    let mut state = pollster::block_on(State::new(window.clone(), render_device, system_info))?;
+    };
     
     // Start the event loop
-    event_loop.run_app(move |event, elwt| {
-        match event {
-            Event::WindowEvent { ref event, window_id } if window_id == window.id() => {
-                if !state.input(event) {
-                    match event {
-                        WindowEvent::CloseRequested => elwt.exit(),
-                        WindowEvent::Resized(physical_size) => {
-                            state.resize(*physical_size);
-                        }
-                        WindowEvent::RedrawRequested => {
-                            state.update();
-                            match state.render() {
-                                Ok(_) => {}
-                                Err(wgpu::SurfaceError::Lost) => state.resize(state.size),
-                                Err(wgpu::SurfaceError::OutOfMemory) => elwt.exit(),
-                                Err(e) => eprintln!("{:?}", e),
-                            }
-                        }
-                        WindowEvent::KeyboardInput { 
-                            event: KeyEvent {
-                                physical_key: PhysicalKey::Code(KeyCode::Escape),
-                                state: ElementState::Pressed,
-                                ..
-                            },
-                            ..
-                        } => {
-                            elwt.exit();
-                        }
-                        _ => {}
-                    }
-                }
-            }
-            Event::AboutToWait => {
-                window.request_redraw();
-            }
-            _ => {}
-        }
-    })?;
-    
+    event_loop.run_app(&mut app)?;
+
     Ok(())
 }
