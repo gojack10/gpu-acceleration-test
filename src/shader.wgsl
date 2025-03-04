@@ -40,4 +40,13 @@ var s_diffuse: sampler;
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     return textureSample(t_diffuse, s_diffuse, in.tex_coords);
+}
+
+// Specialized fragment shader for debug axes that uses vertex normal as color
+@fragment
+fn fs_debug_main(in: VertexOutput) -> @location(0) vec4<f32> {
+    // Use normal as color (red = x, green = y, blue = z)
+    // Convert from [-1, 1] to [0, 1] range for color
+    let color = abs(in.normal);
+    return vec4<f32>(color, 1.0);
 } 

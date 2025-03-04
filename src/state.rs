@@ -1,13 +1,15 @@
 use anyhow::Result;
-use glam::{Mat4, Quat, Vec3};
+use glam::{Mat4, Quat, Vec3, Vec4};
 use std::{sync::Arc, time::Instant};
 use wgpu::util::DeviceExt;
 use winit::{
     dpi::PhysicalSize,
     event::WindowEvent,
     window::Window,
+    keyboard::{KeyCode, PhysicalKey},
+    event::ElementState,
 };
-use egui::{};
+use egui::{pos2, Color32, Pos2, Align2};
 use log::debug;
 
 // For egui_wgpu_backend
@@ -46,6 +48,14 @@ pub struct State {
     pub last_update: Instant,
     pub render_device: RenderDevice,
     pub system_info: SystemInfo,
+    pub debug_mode: bool,
+    pub debug_axis_buffer: Option<wgpu::Buffer>,
+    pub debug_axis_pipeline: Option<wgpu::RenderPipeline>,
+    pub world_axis_buffer: Option<wgpu::Buffer>,
+    pub world_axis_bind_group: Option<wgpu::BindGroup>,
+    pub world_axis_uniform_buffer: Option<wgpu::Buffer>,
+    pub debug_axis_positions: Vec<Vec3>,
+    pub world_axis_positions: Vec<Vec3>,
 }
 
 impl State {
@@ -285,53 +295,6 @@ impl State {
         // Log the depth texture format for debugging
         debug!("Depth texture format: {:?}", depth_texture.texture.format());
         
-        // Create an updated pipeline with proper depth stencil state (commented out until we confirm the issue)
-        /*
-        let render_pipeline_with_depth = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("Render Pipeline With Depth"),
-            layout: Some(&render_pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: &shader,
-                entry_point: "vs_main",
-                buffers: &[Vertex::desc()],
-                compilation_options: Default::default(),
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &shader,
-                entry_point: "fs_main",
-                targets: &[Some(wgpu::ColorTargetState {
-                    format: config.format,
-                    blend: Some(wgpu::BlendState::REPLACE),
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-                compilation_options: Default::default(),
-            }),
-            primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::TriangleList,
-                strip_index_format: None,
-                front_face: wgpu::FrontFace::Ccw,
-                cull_mode: Some(wgpu::Face::Back),
-                polygon_mode: wgpu::PolygonMode::Fill,
-                unclipped_depth: false,
-                conservative: false,
-            },
-            depth_stencil: Some(wgpu::DepthStencilState {
-                format: wgpu::TextureFormat::Depth32Float,
-                depth_write_enabled: true,
-                depth_compare: wgpu::CompareFunction::Less,
-                stencil: wgpu::StencilState::default(),
-                bias: wgpu::DepthBiasState::default(),
-            }),
-            multisample: wgpu::MultisampleState {
-                count: 1,
-                mask: !0,
-                alpha_to_coverage_enabled: false,
-            },
-            multiview: None,
-            cache: None,
-        });
-        */
-
         // Create the cube vertices and indices
         let (vertices, indices) = create_cube_vertices();
 
@@ -368,6 +331,48 @@ impl State {
             1,
         );
 
+        // Create debug axis buffer for object axes
+        let debug_axis_buffer = create_debug_axis_buffer(&device);
+        
+        // Create debug axis buffer for world space axes (bottom left)
+        let world_axis_buffer = create_debug_axis_buffer(&device);
+        
+        // Create world axis uniform buffer for positioning the axes in bottom left
+        let world_axis_uniform_buffer = device.create_buffer_init(
+            &wgpu::util::BufferInitDescriptor {
+                label: Some("World Axis Uniform Buffer"),
+                contents: bytemuck::cast_slice(&[Uniforms {
+                    model_view_proj: Mat4::IDENTITY.to_cols_array_2d(),
+                }]),
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            }
+        );
+        
+        // Store axis endpoint positions for label rendering
+        let debug_axis_positions = vec![
+            Vec3::new(1.0, 0.0, 0.0), // X axis endpoint
+            Vec3::new(0.0, 1.0, 0.0), // Y axis endpoint
+            Vec3::new(0.0, 0.0, 1.0), // Z axis endpoint
+        ];
+        
+        // Same for world axis positions
+        let world_axis_positions = debug_axis_positions.clone();
+        
+        // Create world axis bind group
+        let world_axis_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            layout: &uniform_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: world_axis_uniform_buffer.as_entire_binding(),
+                },
+            ],
+            label: Some("world_axis_bind_group"),
+        });
+        
+        // Create the debug axis pipeline
+        let debug_axis_pipeline = create_debug_axis_pipeline(&device, &render_pipeline_layout, &config);
+
         Ok(Self {
             surface,
             device,
@@ -386,12 +391,20 @@ impl State {
             depth_texture,
             egui_state,
             egui_renderer,
-            frame_times: vec![0.0; 100],
-            fps: 0.0,
+            frame_times: vec![16.7; 30],
+            fps: 60.0,
             rotation: 0.0,
             last_update: Instant::now(),
             render_device,
             system_info,
+            debug_mode: false,
+            debug_axis_buffer: Some(debug_axis_buffer),
+            debug_axis_pipeline: Some(debug_axis_pipeline),
+            world_axis_buffer: Some(world_axis_buffer),
+            world_axis_bind_group: Some(world_axis_bind_group),
+            world_axis_uniform_buffer: Some(world_axis_uniform_buffer),
+            debug_axis_positions,
+            world_axis_positions,
         })
     }
 
@@ -405,8 +418,22 @@ impl State {
         }
     }
 
-    pub fn input(&mut self, _event: &WindowEvent) -> bool {
-        false
+    pub fn input(&mut self, event: &WindowEvent) -> bool {
+        match event {
+            WindowEvent::KeyboardInput { 
+                event: winit::event::KeyEvent {
+                    physical_key: PhysicalKey::Code(KeyCode::KeyD),
+                    state: ElementState::Pressed,
+                    ..
+                },
+                ..
+            } => {
+                self.debug_mode = !self.debug_mode;
+                debug!("Debug mode: {}", self.debug_mode);
+                true
+            },
+            _ => false,
+        }
     }
 
     pub fn update(&mut self) {
@@ -454,6 +481,41 @@ impl State {
             0,
             bytemuck::cast_slice(&[uniform_data]),
         );
+
+        // Update debug world axis uniform if in debug mode
+        if self.debug_mode && self.world_axis_uniform_buffer.is_some() {
+            // Create a special transform for the world axes at bottom left
+            let aspect = self.config.width as f32 / self.config.height as f32;
+            
+            // Scale and position the axes in the bottom left corner
+            let scale = 0.15; // Scale of the axes
+            let x_pos = -0.85; // Position in NDC (-1 to 1)
+            let y_pos = -0.85;
+            
+            // Create model-view-projection matrix for fixed screen space position
+            let world_axis_model = Mat4::from_scale_rotation_translation(
+                Vec3::splat(scale),
+                Quat::IDENTITY,
+                Vec3::new(x_pos, y_pos, 0.0)
+            );
+            
+            // Create orthographic projection for screen space
+            let ortho = Mat4::orthographic_rh(-aspect, aspect, -1.0, 1.0, -10.0, 10.0);
+            
+            // Combine matrices
+            let world_mvp = ortho * world_axis_model;
+            
+            // Update uniform buffer
+            let world_uniform_data = Uniforms {
+                model_view_proj: world_mvp.to_cols_array_2d(),
+            };
+            
+            self.queue.write_buffer(
+                self.world_axis_uniform_buffer.as_ref().unwrap(),
+                0,
+                bytemuck::cast_slice(&[world_uniform_data]),
+            );
+        }
     }
 
     pub fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
@@ -505,7 +567,65 @@ impl State {
             render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
             render_pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
             render_pass.draw_indexed(0..self.num_indices, 0, 0..1);
+            
+            // Draw debug axes if in debug mode
+            if self.debug_mode && 
+               self.debug_axis_buffer.is_some() && 
+               self.debug_axis_pipeline.is_some() {
+                // 1. Draw object-attached axes
+                render_pass.set_pipeline(self.debug_axis_pipeline.as_ref().unwrap());
+                render_pass.set_bind_group(0, &self.uniform_bind_group, &[]);
+                render_pass.set_vertex_buffer(0, self.debug_axis_buffer.as_ref().unwrap().slice(..));
+                render_pass.draw(0..6, 0..1); // 3 lines, 2 vertices each
+                
+                // 2. Draw world space axes in bottom left corner
+                if self.world_axis_bind_group.is_some() && self.world_axis_buffer.is_some() {
+                    render_pass.set_bind_group(0, self.world_axis_bind_group.as_ref().unwrap(), &[]);
+                    render_pass.set_vertex_buffer(0, self.world_axis_buffer.as_ref().unwrap().slice(..));
+                    render_pass.draw(0..6, 0..1); // 3 lines, 2 vertices each
+                }
+            }
         }
+        
+        // Get matrices for label positioning
+        let aspect = self.config.width as f32 / self.config.height as f32;
+        let proj = Mat4::perspective_rh(45.0_f32.to_radians(), aspect, 0.1, 100.0);
+        let view = Mat4::look_at_rh(
+            Vec3::new(0.0, 1.5, 3.0),
+            Vec3::new(0.0, 0.0, 0.0),
+            Vec3::new(0.0, 1.0, 0.0),
+        );
+        
+        // Create rotation for model (for object-attached axes)
+        let rotation = Quat::from_rotation_y(self.rotation);
+        let model = Mat4::from_quat(rotation);
+        
+        // Calculate world positions of object-attached axes
+        let rotated_axis_positions: Vec<Vec3> = self.debug_axis_positions.iter()
+            .map(|pos| model.transform_point3(*pos))
+            .collect();
+        
+        // World axis positions in screen space (for bottom left corner)
+        let scale = 0.15;
+        let x_pos = -0.85;
+        let y_pos = -0.85;
+        
+        let world_axis_model = Mat4::from_scale_rotation_translation(
+            Vec3::splat(scale),
+            Quat::IDENTITY,
+            Vec3::new(x_pos, y_pos, 0.0)
+        );
+        
+        let ortho = Mat4::orthographic_rh(-aspect, aspect, -1.0, 1.0, -10.0, 10.0);
+        let world_mvp = ortho * world_axis_model;
+        
+        // Create scaled world axis positions
+        let scaled_world_positions: Vec<Vec3> = self.world_axis_positions.iter()
+            .map(|pos| {
+                let scaled_pos = *pos * scale;
+                Vec3::new(scaled_pos.x + x_pos, scaled_pos.y + y_pos, scaled_pos.z)
+            })
+            .collect();
         
         // Render egui UI
         let screen_descriptor = ScreenDescriptor {
@@ -537,6 +657,66 @@ impl State {
                     ui.label(&self.system_info.gpus[self.system_info.selected_gpu]);
                 }
             });
+            
+            // Render axis labels if in debug mode
+            if self.debug_mode {
+                // Helper function to project 3D point to 2D screen space
+                let project_point = |point: Vec3, mvp: Mat4| -> Option<Pos2> {
+                    // Transform point to clip space
+                    let clip_pos = mvp * Vec4::new(point.x, point.y, point.z, 1.0);
+                    
+                    // Check if point is behind camera
+                    if clip_pos.w <= 0.0 {
+                        return None;
+                    }
+                    
+                    // Convert to normalized device coordinates
+                    let ndc = Vec3::new(
+                        clip_pos.x / clip_pos.w,
+                        clip_pos.y / clip_pos.w,
+                        clip_pos.z / clip_pos.w
+                    );
+                    
+                    // Convert to screen coordinates
+                    let screen_x = (ndc.x + 1.0) * 0.5 * self.config.width as f32;
+                    let screen_y = (1.0 - ndc.y) * 0.5 * self.config.height as f32; // Y is flipped
+                    
+                    Some(pos2(screen_x, screen_y))
+                };
+                
+                // Project object-attached axis positions to screen space
+                let mvp = proj * view * model;
+                
+                let axis_labels = ["X", "Y", "Z"];
+                let axis_colors = [Color32::RED, Color32::GREEN, Color32::BLUE];
+                
+                // Draw object axis labels
+                for (i, pos) in rotated_axis_positions.iter().enumerate() {
+                    if let Some(screen_pos) = project_point(*pos, mvp) {
+                        // Draw axis label
+                        egui::Area::new(format!("axis_label_{}", i))
+                            .movable(false)
+                            .anchor(Align2::CENTER_CENTER, screen_pos)
+                            .show(ctx, |ui| {
+                                ui.colored_label(axis_colors[i], axis_labels[i]);
+                            });
+                    }
+                }
+                
+                // Project world axis positions to screen space
+                for (i, pos) in scaled_world_positions.iter().enumerate() {
+                    // For world axes in the corner, we need orthographic projection
+                    if let Some(screen_pos) = project_point(*pos, ortho) {
+                        // Draw world axis label
+                        egui::Area::new(format!("world_axis_label_{}", i))
+                            .movable(false)
+                            .anchor(Align2::CENTER_CENTER, screen_pos)
+                            .show(ctx, |ui| {
+                                ui.colored_label(axis_colors[i], axis_labels[i]);
+                            });
+                    }
+                }
+            }
         });
         
         // Handle egui output and render
@@ -572,4 +752,84 @@ impl State {
         
         Ok(())
     }
+}
+
+// Helper function to create the debug axis rendering pipeline
+pub fn create_debug_axis_pipeline(
+    device: &wgpu::Device,
+    pipeline_layout: &wgpu::PipelineLayout,
+    config: &wgpu::SurfaceConfiguration,
+) -> wgpu::RenderPipeline {
+    let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        label: Some("Debug Axis Shader"),
+        source: wgpu::ShaderSource::Wgsl(include_str!("shader.wgsl").into()),
+    });
+
+    device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some("Debug Axis Pipeline"),
+        layout: Some(pipeline_layout),
+        vertex: wgpu::VertexState {
+            module: &shader,
+            entry_point: "vs_main",
+            buffers: &[Vertex::desc()],
+            compilation_options: Default::default(),
+        },
+        fragment: Some(wgpu::FragmentState {
+            module: &shader,
+            entry_point: "fs_debug_main", // Use specialized fragment shader
+            targets: &[Some(wgpu::ColorTargetState {
+                format: config.format,
+                blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                write_mask: wgpu::ColorWrites::ALL,
+            })],
+            compilation_options: Default::default(),
+        }),
+        primitive: wgpu::PrimitiveState {
+            topology: wgpu::PrimitiveTopology::LineList, // Use lines for axes
+            strip_index_format: None,
+            front_face: wgpu::FrontFace::Ccw,
+            cull_mode: None, // Don't cull for debug axes
+            polygon_mode: wgpu::PolygonMode::Fill,
+            unclipped_depth: false,
+            conservative: false,
+        },
+        depth_stencil: Some(wgpu::DepthStencilState {
+            format: wgpu::TextureFormat::Depth32Float,
+            depth_write_enabled: true,
+            depth_compare: wgpu::CompareFunction::Less,
+            stencil: wgpu::StencilState::default(),
+            bias: wgpu::DepthBiasState::default(),
+        }),
+        multisample: wgpu::MultisampleState {
+            count: 1,
+            mask: !0,
+            alpha_to_coverage_enabled: false,
+        },
+        multiview: None,
+        cache: None,
+    })
+}
+
+// Helper function to create debug axis buffer
+pub fn create_debug_axis_buffer(device: &wgpu::Device) -> wgpu::Buffer {
+    // Create vertices for XYZ axes (red = X, green = Y, blue = Z)
+    let axis_vertices = vec![
+        // X-axis (red)
+        Vertex { position: [0.0, 0.0, 0.0], tex_coords: [1.0, 0.0], normal: [1.0, 0.0, 0.0] }, // origin
+        Vertex { position: [1.0, 0.0, 0.0], tex_coords: [1.0, 0.0], normal: [1.0, 0.0, 0.0] }, // x+
+        
+        // Y-axis (green)
+        Vertex { position: [0.0, 0.0, 0.0], tex_coords: [0.0, 1.0], normal: [0.0, 1.0, 0.0] }, // origin
+        Vertex { position: [0.0, 1.0, 0.0], tex_coords: [0.0, 1.0], normal: [0.0, 1.0, 0.0] }, // y+
+        
+        // Z-axis (blue)
+        Vertex { position: [0.0, 0.0, 0.0], tex_coords: [0.0, 0.0], normal: [0.0, 0.0, 1.0] }, // origin
+        Vertex { position: [0.0, 0.0, 1.0], tex_coords: [0.0, 0.0], normal: [0.0, 0.0, 1.0] }, // z+
+    ];
+    
+    device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("Debug Axis Buffer"),
+        contents: bytemuck::cast_slice(&axis_vertices),
+        usage: wgpu::BufferUsages::VERTEX,
+    })
 } 
