@@ -168,6 +168,11 @@ impl State {
         let block_bytes = include_bytes!("../assets/textures/block.png");
         let block_texture = create_texture_from_bytes(&device, &queue, block_bytes, "block_texture").unwrap();
         
+        // Log texture information
+        println!("Loaded texture with dimensions: {} x {}", 
+                 block_texture.texture.size().width, 
+                 block_texture.texture.size().height);
+        
         // Create texture bind group layout
         let texture_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -465,9 +470,22 @@ impl State {
             Vec3::new(0.0, 1.0, 0.0),
         );
         
-        // Create model matrix with rotation
-        let rotation = Quat::from_rotation_y(self.rotation);
-        let model = Mat4::from_quat(rotation);
+        // Apply texture to cube, then rotate the cube, then app starts
+        // This follows the correct order of operations for proper texture orientation
+        
+        // 1. Create the base model matrix (identity) - represents the cube with texture applied
+        let base_model = Mat4::IDENTITY;
+        
+        // 2. Apply fixed rotation to align the texture correctly
+        // This is applied during the initial setup, before continuous animation
+        let x_rotation = Mat4::from_rotation_x(std::f32::consts::FRAC_PI_2);
+        
+        // 3. Apply continuous Y-rotation for animation (happens during app runtime)
+        let y_rotation_matrix = Mat4::from_rotation_y(self.rotation);
+        
+        // 4. Combine: First apply texture (implicit in base_model), 
+        // then fixed rotation for alignment, then continuous animation
+        let model = y_rotation_matrix * x_rotation * base_model;
         
         // Combine into model-view-projection matrix
         let mvp = proj * view * model;
@@ -618,7 +636,7 @@ impl State {
         );
         
         let ortho = Mat4::orthographic_rh(-aspect, aspect, -1.0, 1.0, -10.0, 10.0);
-        let world_mvp = ortho * world_axis_model;
+        let _world_mvp = ortho * world_axis_model; // Prefix with underscore to indicate intentionally unused
         
         // Create scaled world axis positions
         let scaled_world_positions: Vec<Vec3> = self.world_axis_positions.iter()
