@@ -41,50 +41,51 @@ pub struct Uniforms {
 
 pub fn create_cube_vertices() -> (Vec<Vertex>, Vec<u16>) {
     let vertices = vec![
-        // Front face
-        Vertex { position: [-0.5, -0.5, 0.5], tex_coords: [0.0, 1.0], normal: [0.0, 0.0, 1.0] },
-        Vertex { position: [0.5, -0.5, 0.5], tex_coords: [1.0, 1.0], normal: [0.0, 0.0, 1.0] },
-        Vertex { position: [0.5, 0.5, 0.5], tex_coords: [1.0, 0.0], normal: [0.0, 0.0, 1.0] },
-        Vertex { position: [-0.5, 0.5, 0.5], tex_coords: [0.0, 0.0], normal: [0.0, 0.0, 1.0] },
+        // Front face (Face Index 0 in Blender)
+        // Positions are scaled by 0.5 to match our -0.5 to 0.5 cube size (Blender uses -1.0 to 1.0)
+        Vertex { position: [0.5, 0.5, 0.5], tex_coords: [0.5000, 0.6667], normal: [0.0, 0.0, 1.0] },       // Vertex 0
+        Vertex { position: [-0.5, 0.5, 0.5], tex_coords: [0.5000, 1.0000], normal: [0.0, 0.0, 1.0] },      // Vertex 4
+        Vertex { position: [-0.5, -0.5, 0.5], tex_coords: [0.2502, 1.0000], normal: [0.0, 0.0, 1.0] },     // Vertex 6
+        Vertex { position: [0.5, -0.5, 0.5], tex_coords: [0.2502, 0.6667], normal: [0.0, 0.0, 1.0] },      // Vertex 2
         
-        // Back face
-        Vertex { position: [-0.5, -0.5, -0.5], tex_coords: [1.0, 1.0], normal: [0.0, 0.0, -1.0] },
-        Vertex { position: [-0.5, 0.5, -0.5], tex_coords: [1.0, 0.0], normal: [0.0, 0.0, -1.0] },
-        Vertex { position: [0.5, 0.5, -0.5], tex_coords: [0.0, 0.0], normal: [0.0, 0.0, -1.0] },
-        Vertex { position: [0.5, -0.5, -0.5], tex_coords: [0.0, 1.0], normal: [0.0, 0.0, -1.0] },
+        // Bottom face (Face Index 1 in Blender)
+        Vertex { position: [0.5, -0.5, -0.5], tex_coords: [0.2502, 0.3333], normal: [0.0, -1.0, 0.0] },    // Vertex 3
+        Vertex { position: [0.5, -0.5, 0.5], tex_coords: [0.2502, 0.6667], normal: [0.0, -1.0, 0.0] },     // Vertex 2
+        Vertex { position: [-0.5, -0.5, 0.5], tex_coords: [0.0004, 0.6667], normal: [0.0, -1.0, 0.0] },    // Vertex 6
+        Vertex { position: [-0.5, -0.5, -0.5], tex_coords: [0.0004, 0.3333], normal: [0.0, -1.0, 0.0] },   // Vertex 7
         
-        // Top face
-        Vertex { position: [-0.5, 0.5, -0.5], tex_coords: [0.0, 1.0], normal: [0.0, 1.0, 0.0] },
-        Vertex { position: [-0.5, 0.5, 0.5], tex_coords: [0.0, 0.0], normal: [0.0, 1.0, 0.0] },
-        Vertex { position: [0.5, 0.5, 0.5], tex_coords: [1.0, 0.0], normal: [0.0, 1.0, 0.0] },
-        Vertex { position: [0.5, 0.5, -0.5], tex_coords: [1.0, 1.0], normal: [0.0, 1.0, 0.0] },
+        // Left face (Face Index 2 in Blender)
+        Vertex { position: [-0.5, -0.5, -0.5], tex_coords: [0.9996, 0.3333], normal: [-1.0, 0.0, 0.0] },   // Vertex 7
+        Vertex { position: [-0.5, -0.5, 0.5], tex_coords: [0.9996, 0.6667], normal: [-1.0, 0.0, 0.0] },    // Vertex 6
+        Vertex { position: [-0.5, 0.5, 0.5], tex_coords: [0.7498, 0.6667], normal: [-1.0, 0.0, 0.0] },     // Vertex 4
+        Vertex { position: [-0.5, 0.5, -0.5], tex_coords: [0.7498, 0.3333], normal: [-1.0, 0.0, 0.0] },    // Vertex 5
         
-        // Bottom face
-        Vertex { position: [-0.5, -0.5, -0.5], tex_coords: [1.0, 1.0], normal: [0.0, -1.0, 0.0] },
-        Vertex { position: [0.5, -0.5, -0.5], tex_coords: [0.0, 1.0], normal: [0.0, -1.0, 0.0] },
-        Vertex { position: [0.5, -0.5, 0.5], tex_coords: [0.0, 0.0], normal: [0.0, -1.0, 0.0] },
-        Vertex { position: [-0.5, -0.5, 0.5], tex_coords: [1.0, 0.0], normal: [0.0, -1.0, 0.0] },
+        // Back face (Face Index 3 in Blender)
+        Vertex { position: [-0.5, 0.5, -0.5], tex_coords: [0.5000, 0.0000], normal: [0.0, 0.0, -1.0] },    // Vertex 5
+        Vertex { position: [0.5, 0.5, -0.5], tex_coords: [0.5000, 0.3333], normal: [0.0, 0.0, -1.0] },     // Vertex 1
+        Vertex { position: [0.5, -0.5, -0.5], tex_coords: [0.2502, 0.3333], normal: [0.0, 0.0, -1.0] },    // Vertex 3
+        Vertex { position: [-0.5, -0.5, -0.5], tex_coords: [0.2502, 0.0000], normal: [0.0, 0.0, -1.0] },   // Vertex 7
         
-        // Right face
-        Vertex { position: [0.5, -0.5, -0.5], tex_coords: [1.0, 1.0], normal: [1.0, 0.0, 0.0] },
-        Vertex { position: [0.5, 0.5, -0.5], tex_coords: [1.0, 0.0], normal: [1.0, 0.0, 0.0] },
-        Vertex { position: [0.5, 0.5, 0.5], tex_coords: [0.0, 0.0], normal: [1.0, 0.0, 0.0] },
-        Vertex { position: [0.5, -0.5, 0.5], tex_coords: [0.0, 1.0], normal: [1.0, 0.0, 0.0] },
+        // Right face (Face Index 4 in Blender)
+        Vertex { position: [0.5, 0.5, -0.5], tex_coords: [0.5000, 0.3333], normal: [1.0, 0.0, 0.0] },      // Vertex 1
+        Vertex { position: [0.5, 0.5, 0.5], tex_coords: [0.5000, 0.6667], normal: [1.0, 0.0, 0.0] },       // Vertex 0
+        Vertex { position: [0.5, -0.5, 0.5], tex_coords: [0.2502, 0.6667], normal: [1.0, 0.0, 0.0] },      // Vertex 2
+        Vertex { position: [0.5, -0.5, -0.5], tex_coords: [0.2502, 0.3333], normal: [1.0, 0.0, 0.0] },     // Vertex 3
         
-        // Left face
-        Vertex { position: [-0.5, -0.5, -0.5], tex_coords: [0.0, 1.0], normal: [-1.0, 0.0, 0.0] },
-        Vertex { position: [-0.5, -0.5, 0.5], tex_coords: [1.0, 1.0], normal: [-1.0, 0.0, 0.0] },
-        Vertex { position: [-0.5, 0.5, 0.5], tex_coords: [1.0, 0.0], normal: [-1.0, 0.0, 0.0] },
-        Vertex { position: [-0.5, 0.5, -0.5], tex_coords: [0.0, 0.0], normal: [-1.0, 0.0, 0.0] },
+        // Top face (Face Index 5 in Blender)
+        Vertex { position: [-0.5, 0.5, -0.5], tex_coords: [0.7498, 0.3333], normal: [0.0, 1.0, 0.0] },     // Vertex 5
+        Vertex { position: [-0.5, 0.5, 0.5], tex_coords: [0.7498, 0.6667], normal: [0.0, 1.0, 0.0] },      // Vertex 4
+        Vertex { position: [0.5, 0.5, 0.5], tex_coords: [0.5000, 0.6667], normal: [0.0, 1.0, 0.0] },       // Vertex 0
+        Vertex { position: [0.5, 0.5, -0.5], tex_coords: [0.5000, 0.3333], normal: [0.0, 1.0, 0.0] },      // Vertex 1
     ];
 
     let indices = vec![
         0, 1, 2, 2, 3, 0, // front
-        4, 5, 6, 6, 7, 4, // back
-        8, 9, 10, 10, 11, 8, // top
-        12, 13, 14, 14, 15, 12, // bottom
+        4, 5, 6, 6, 7, 4, // bottom
+        8, 9, 10, 10, 11, 8, // left
+        12, 13, 14, 14, 15, 12, // back
         16, 17, 18, 18, 19, 16, // right
-        20, 21, 22, 22, 23, 20, // left
+        20, 21, 22, 22, 23, 20, // top
     ];
 
     (vertices, indices)
