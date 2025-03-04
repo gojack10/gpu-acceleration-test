@@ -1,0 +1,23 @@
+[package]
+name = "gpu-acceleration-test"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+winit = "0.30.9"
+wgpu = "22.1.0"
+pollster = "0.3.0"
+bytemuck = { version = "1.14.3", features = ["derive"] }
+glam = "0.25.0"
+image = "0.24.9"
+anyhow = "1.0.82"
+log = "0.4.21"
+env_logger = "0.10.2"
+egui = "0.29.0"
+egui_wgpu_backend = "0.31.0"
+egui-winit = "0.29.0"
+raw-window-handle = "0.5.2"
+sysinfo = "0.30.13"
+futures = "0.3.30"
