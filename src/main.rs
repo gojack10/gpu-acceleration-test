@@ -114,6 +114,9 @@ fn main() -> Result<()> {
     // Select render device (default to first GPU)
     let render_device = system_info.get_render_device();
     
+    // Add logging for debugging render device configuration
+    log::debug!("Render device selected: {:?}", render_device);
+    
     // Create our application handler
     let mut app = App {
         window: None,
