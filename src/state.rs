@@ -349,10 +349,11 @@ impl State {
         );
         
         // Store axis endpoint positions for label rendering
+        let arrow_size = 0.15;
         let debug_axis_positions = vec![
-            Vec3::new(1.0, 0.0, 0.0), // X axis endpoint
-            Vec3::new(0.0, 1.0, 0.0), // Y axis endpoint
-            Vec3::new(0.0, 0.0, 1.0), // Z axis endpoint
+            Vec3::new(1.0 + arrow_size, 0.0, 0.0), // X axis endpoint with arrow
+            Vec3::new(0.0, 1.0 + arrow_size, 0.0), // Y axis endpoint with arrow
+            Vec3::new(0.0, 0.0, 1.0 + arrow_size), // Z axis endpoint with arrow
         ];
         
         // Same for world axis positions
@@ -576,13 +577,13 @@ impl State {
                 render_pass.set_pipeline(self.debug_axis_pipeline.as_ref().unwrap());
                 render_pass.set_bind_group(0, &self.uniform_bind_group, &[]);
                 render_pass.set_vertex_buffer(0, self.debug_axis_buffer.as_ref().unwrap().slice(..));
-                render_pass.draw(0..6, 0..1); // 3 lines, 2 vertices each
+                render_pass.draw(0..72, 0..1); // 3 axes, 24 triangles total (8 per axis), 3 vertices per triangle
                 
                 // 2. Draw world space axes in bottom left corner
                 if self.world_axis_bind_group.is_some() && self.world_axis_buffer.is_some() {
                     render_pass.set_bind_group(0, self.world_axis_bind_group.as_ref().unwrap(), &[]);
                     render_pass.set_vertex_buffer(0, self.world_axis_buffer.as_ref().unwrap().slice(..));
-                    render_pass.draw(0..6, 0..1); // 3 lines, 2 vertices each
+                    render_pass.draw(0..72, 0..1); // 3 axes, 24 triangles total (8 per axis), 3 vertices per triangle
                 }
             }
         }
@@ -590,7 +591,7 @@ impl State {
         // Get matrices for label positioning
         let aspect = self.config.width as f32 / self.config.height as f32;
         let proj = Mat4::perspective_rh(45.0_f32.to_radians(), aspect, 0.1, 100.0);
-        let view = Mat4::look_at_rh(
+        let camera_view = Mat4::look_at_rh(
             Vec3::new(0.0, 1.5, 3.0),
             Vec3::new(0.0, 0.0, 0.0),
             Vec3::new(0.0, 1.0, 0.0),
@@ -685,20 +686,48 @@ impl State {
                 };
                 
                 // Project object-attached axis positions to screen space
-                let mvp = proj * view * model;
+                let mvp = proj * camera_view * model;
                 
-                let axis_labels = ["X", "Y", "Z"];
+                let _axis_labels = ["X", "Y", "Z"];
                 let axis_colors = [Color32::RED, Color32::GREEN, Color32::BLUE];
+                let axis_descriptions = ["Roll (X)", "Pitch (Y)", "Yaw (Z)"];
+                let axis_symbols = ["↻", "↑↓", "↺"];
                 
                 // Draw object axis labels
                 for (i, pos) in rotated_axis_positions.iter().enumerate() {
                     if let Some(screen_pos) = project_point(*pos, mvp) {
-                        // Draw axis label
-                        egui::Area::new(format!("axis_label_{}", i))
+                        // Draw axis label with enhanced information
+                        egui::Area::new(egui::Id::new(format!("axis_label_{}", i)))
                             .movable(false)
-                            .anchor(Align2::CENTER_CENTER, screen_pos)
+                            .anchor(Align2::CENTER_CENTER, egui::Vec2::new(screen_pos.x, screen_pos.y))
                             .show(ctx, |ui| {
-                                ui.colored_label(axis_colors[i], axis_labels[i]);
+                                ui.vertical_centered(|ui| {
+                                    // Draw a colored background for better visibility
+                                    let text_color = Color32::WHITE;
+                                    let bg_color = axis_colors[i].linear_multiply(0.8);
+                                    
+                                    // Create a frame with the axis color as background
+                                    egui::Frame::none()
+                                        .fill(bg_color)
+                                        .rounding(5.0)
+                                        .stroke(egui::Stroke::new(1.0, Color32::WHITE))
+                                        .inner_margin(8.0) // Use a simple float value instead of Margin
+                                        .show(ui, |ui| {
+                                            ui.vertical_centered(|ui| {
+                                                // Add the axis symbol (rotation indicator)
+                                                ui.label(egui::RichText::new(axis_symbols[i])
+                                                    .size(20.0)
+                                                    .color(text_color)
+                                                    .strong());
+                                                
+                                                // Add the axis label and description
+                                                ui.label(egui::RichText::new(axis_descriptions[i])
+                                                    .size(14.0)
+                                                    .color(text_color)
+                                                    .strong());
+                                            });
+                                        });
+                                });
                             });
                     }
                 }
@@ -707,12 +736,38 @@ impl State {
                 for (i, pos) in scaled_world_positions.iter().enumerate() {
                     // For world axes in the corner, we need orthographic projection
                     if let Some(screen_pos) = project_point(*pos, ortho) {
-                        // Draw world axis label
-                        egui::Area::new(format!("world_axis_label_{}", i))
+                        // Draw world axis label with enhanced information
+                        egui::Area::new(egui::Id::new(format!("world_axis_label_{}", i)))
                             .movable(false)
-                            .anchor(Align2::CENTER_CENTER, screen_pos)
+                            .anchor(Align2::CENTER_CENTER, egui::Vec2::new(screen_pos.x, screen_pos.y))
                             .show(ctx, |ui| {
-                                ui.colored_label(axis_colors[i], axis_labels[i]);
+                                ui.vertical_centered(|ui| {
+                                    // Draw a colored background for better visibility
+                                    let text_color = Color32::WHITE;
+                                    let bg_color = axis_colors[i].linear_multiply(0.8);
+                                    
+                                    // Create a frame with the axis color as background
+                                    egui::Frame::none()
+                                        .fill(bg_color)
+                                        .rounding(5.0)
+                                        .stroke(egui::Stroke::new(1.0, Color32::WHITE))
+                                        .inner_margin(6.0) // Use a simple float value instead of Margin
+                                        .show(ui, |ui| {
+                                            ui.vertical_centered(|ui| {
+                                                // Add the axis symbol (rotation indicator)
+                                                ui.label(egui::RichText::new(axis_symbols[i])
+                                                    .size(16.0)
+                                                    .color(text_color)
+                                                    .strong());
+                                                
+                                                // Add the axis label and description
+                                                ui.label(egui::RichText::new(axis_descriptions[i])
+                                                    .size(12.0)
+                                                    .color(text_color)
+                                                    .strong());
+                                            });
+                                        });
+                                });
                             });
                     }
                 }
@@ -785,7 +840,7 @@ pub fn create_debug_axis_pipeline(
             compilation_options: Default::default(),
         }),
         primitive: wgpu::PrimitiveState {
-            topology: wgpu::PrimitiveTopology::LineList, // Use lines for axes
+            topology: wgpu::PrimitiveTopology::TriangleList, // Use triangles for thicker axes
             strip_index_format: None,
             front_face: wgpu::FrontFace::Ccw,
             cull_mode: None, // Don't cull for debug axes
@@ -813,18 +868,136 @@ pub fn create_debug_axis_pipeline(
 // Helper function to create debug axis buffer
 pub fn create_debug_axis_buffer(device: &wgpu::Device) -> wgpu::Buffer {
     // Create vertices for XYZ axes (red = X, green = Y, blue = Z)
+    // Using thicker lines by creating triangular prisms for each axis
+    let axis_thickness = 0.03; // Thickness of the axes
+    let arrow_size = 0.15; // Size of the arrow tips
+    
     let axis_vertices = vec![
-        // X-axis (red)
-        Vertex { position: [0.0, 0.0, 0.0], tex_coords: [1.0, 0.0], normal: [1.0, 0.0, 0.0] }, // origin
-        Vertex { position: [1.0, 0.0, 0.0], tex_coords: [1.0, 0.0], normal: [1.0, 0.0, 0.0] }, // x+
+        // X-axis (red) - thicker line using two triangles
+        // First triangle
+        Vertex { position: [0.0, -axis_thickness, -axis_thickness], tex_coords: [1.0, 0.0], normal: [1.0, 0.0, 0.0] },
+        Vertex { position: [1.0, -axis_thickness, -axis_thickness], tex_coords: [1.0, 0.0], normal: [1.0, 0.0, 0.0] },
+        Vertex { position: [1.0, axis_thickness, -axis_thickness], tex_coords: [1.0, 0.0], normal: [1.0, 0.0, 0.0] },
         
-        // Y-axis (green)
-        Vertex { position: [0.0, 0.0, 0.0], tex_coords: [0.0, 1.0], normal: [0.0, 1.0, 0.0] }, // origin
-        Vertex { position: [0.0, 1.0, 0.0], tex_coords: [0.0, 1.0], normal: [0.0, 1.0, 0.0] }, // y+
+        // Second triangle
+        Vertex { position: [0.0, -axis_thickness, -axis_thickness], tex_coords: [1.0, 0.0], normal: [1.0, 0.0, 0.0] },
+        Vertex { position: [1.0, axis_thickness, -axis_thickness], tex_coords: [1.0, 0.0], normal: [1.0, 0.0, 0.0] },
+        Vertex { position: [0.0, axis_thickness, -axis_thickness], tex_coords: [1.0, 0.0], normal: [1.0, 0.0, 0.0] },
         
-        // Z-axis (blue)
-        Vertex { position: [0.0, 0.0, 0.0], tex_coords: [0.0, 0.0], normal: [0.0, 0.0, 1.0] }, // origin
-        Vertex { position: [0.0, 0.0, 1.0], tex_coords: [0.0, 0.0], normal: [0.0, 0.0, 1.0] }, // z+
+        // Third triangle
+        Vertex { position: [0.0, -axis_thickness, axis_thickness], tex_coords: [1.0, 0.0], normal: [1.0, 0.0, 0.0] },
+        Vertex { position: [1.0, -axis_thickness, axis_thickness], tex_coords: [1.0, 0.0], normal: [1.0, 0.0, 0.0] },
+        Vertex { position: [1.0, axis_thickness, axis_thickness], tex_coords: [1.0, 0.0], normal: [1.0, 0.0, 0.0] },
+        
+        // Fourth triangle
+        Vertex { position: [0.0, -axis_thickness, axis_thickness], tex_coords: [1.0, 0.0], normal: [1.0, 0.0, 0.0] },
+        Vertex { position: [1.0, axis_thickness, axis_thickness], tex_coords: [1.0, 0.0], normal: [1.0, 0.0, 0.0] },
+        Vertex { position: [0.0, axis_thickness, axis_thickness], tex_coords: [1.0, 0.0], normal: [1.0, 0.0, 0.0] },
+        
+        // X-axis arrow tip (pyramid at the end)
+        // First triangle (bottom face)
+        Vertex { position: [1.0, -axis_thickness, -axis_thickness], tex_coords: [1.0, 0.0], normal: [1.0, 0.0, 0.0] },
+        Vertex { position: [1.0, -axis_thickness, axis_thickness], tex_coords: [1.0, 0.0], normal: [1.0, 0.0, 0.0] },
+        Vertex { position: [1.0 + arrow_size, 0.0, 0.0], tex_coords: [1.0, 0.0], normal: [1.0, 0.0, 0.0] },
+        
+        // Second triangle (top face)
+        Vertex { position: [1.0, axis_thickness, -axis_thickness], tex_coords: [1.0, 0.0], normal: [1.0, 0.0, 0.0] },
+        Vertex { position: [1.0, axis_thickness, axis_thickness], tex_coords: [1.0, 0.0], normal: [1.0, 0.0, 0.0] },
+        Vertex { position: [1.0 + arrow_size, 0.0, 0.0], tex_coords: [1.0, 0.0], normal: [1.0, 0.0, 0.0] },
+        
+        // Third triangle (left face)
+        Vertex { position: [1.0, -axis_thickness, -axis_thickness], tex_coords: [1.0, 0.0], normal: [1.0, 0.0, 0.0] },
+        Vertex { position: [1.0, axis_thickness, -axis_thickness], tex_coords: [1.0, 0.0], normal: [1.0, 0.0, 0.0] },
+        Vertex { position: [1.0 + arrow_size, 0.0, 0.0], tex_coords: [1.0, 0.0], normal: [1.0, 0.0, 0.0] },
+        
+        // Fourth triangle (right face)
+        Vertex { position: [1.0, -axis_thickness, axis_thickness], tex_coords: [1.0, 0.0], normal: [1.0, 0.0, 0.0] },
+        Vertex { position: [1.0, axis_thickness, axis_thickness], tex_coords: [1.0, 0.0], normal: [1.0, 0.0, 0.0] },
+        Vertex { position: [1.0 + arrow_size, 0.0, 0.0], tex_coords: [1.0, 0.0], normal: [1.0, 0.0, 0.0] },
+        
+        // Y-axis (green) - thicker line using two triangles
+        // First triangle
+        Vertex { position: [-axis_thickness, 0.0, -axis_thickness], tex_coords: [0.0, 1.0], normal: [0.0, 1.0, 0.0] },
+        Vertex { position: [-axis_thickness, 1.0, -axis_thickness], tex_coords: [0.0, 1.0], normal: [0.0, 1.0, 0.0] },
+        Vertex { position: [axis_thickness, 1.0, -axis_thickness], tex_coords: [0.0, 1.0], normal: [0.0, 1.0, 0.0] },
+        
+        // Second triangle
+        Vertex { position: [-axis_thickness, 0.0, -axis_thickness], tex_coords: [0.0, 1.0], normal: [0.0, 1.0, 0.0] },
+        Vertex { position: [axis_thickness, 1.0, -axis_thickness], tex_coords: [0.0, 1.0], normal: [0.0, 1.0, 0.0] },
+        Vertex { position: [axis_thickness, 0.0, -axis_thickness], tex_coords: [0.0, 1.0], normal: [0.0, 1.0, 0.0] },
+        
+        // Third triangle
+        Vertex { position: [-axis_thickness, 0.0, axis_thickness], tex_coords: [0.0, 1.0], normal: [0.0, 1.0, 0.0] },
+        Vertex { position: [-axis_thickness, 1.0, axis_thickness], tex_coords: [0.0, 1.0], normal: [0.0, 1.0, 0.0] },
+        Vertex { position: [axis_thickness, 1.0, axis_thickness], tex_coords: [0.0, 1.0], normal: [0.0, 1.0, 0.0] },
+        
+        // Fourth triangle
+        Vertex { position: [-axis_thickness, 0.0, axis_thickness], tex_coords: [0.0, 1.0], normal: [0.0, 1.0, 0.0] },
+        Vertex { position: [axis_thickness, 1.0, axis_thickness], tex_coords: [0.0, 1.0], normal: [0.0, 1.0, 0.0] },
+        Vertex { position: [axis_thickness, 0.0, axis_thickness], tex_coords: [0.0, 1.0], normal: [0.0, 1.0, 0.0] },
+        
+        // Y-axis arrow tip (pyramid at the end)
+        // First triangle (bottom face)
+        Vertex { position: [-axis_thickness, 1.0, -axis_thickness], tex_coords: [0.0, 1.0], normal: [0.0, 1.0, 0.0] },
+        Vertex { position: [-axis_thickness, 1.0, axis_thickness], tex_coords: [0.0, 1.0], normal: [0.0, 1.0, 0.0] },
+        Vertex { position: [0.0, 1.0 + arrow_size, 0.0], tex_coords: [0.0, 1.0], normal: [0.0, 1.0, 0.0] },
+        
+        // Second triangle (top face)
+        Vertex { position: [axis_thickness, 1.0, -axis_thickness], tex_coords: [0.0, 1.0], normal: [0.0, 1.0, 0.0] },
+        Vertex { position: [axis_thickness, 1.0, axis_thickness], tex_coords: [0.0, 1.0], normal: [0.0, 1.0, 0.0] },
+        Vertex { position: [0.0, 1.0 + arrow_size, 0.0], tex_coords: [0.0, 1.0], normal: [0.0, 1.0, 0.0] },
+        
+        // Third triangle (left face)
+        Vertex { position: [-axis_thickness, 1.0, -axis_thickness], tex_coords: [0.0, 1.0], normal: [0.0, 1.0, 0.0] },
+        Vertex { position: [axis_thickness, 1.0, -axis_thickness], tex_coords: [0.0, 1.0], normal: [0.0, 1.0, 0.0] },
+        Vertex { position: [0.0, 1.0 + arrow_size, 0.0], tex_coords: [0.0, 1.0], normal: [0.0, 1.0, 0.0] },
+        
+        // Fourth triangle (right face)
+        Vertex { position: [-axis_thickness, 1.0, axis_thickness], tex_coords: [0.0, 1.0], normal: [0.0, 1.0, 0.0] },
+        Vertex { position: [axis_thickness, 1.0, axis_thickness], tex_coords: [0.0, 1.0], normal: [0.0, 1.0, 0.0] },
+        Vertex { position: [0.0, 1.0 + arrow_size, 0.0], tex_coords: [0.0, 1.0], normal: [0.0, 1.0, 0.0] },
+        
+        // Z-axis (blue) - thicker line using two triangles
+        // First triangle
+        Vertex { position: [-axis_thickness, -axis_thickness, 0.0], tex_coords: [0.0, 0.0], normal: [0.0, 0.0, 1.0] },
+        Vertex { position: [-axis_thickness, -axis_thickness, 1.0], tex_coords: [0.0, 0.0], normal: [0.0, 0.0, 1.0] },
+        Vertex { position: [axis_thickness, -axis_thickness, 1.0], tex_coords: [0.0, 0.0], normal: [0.0, 0.0, 1.0] },
+        
+        // Second triangle
+        Vertex { position: [-axis_thickness, -axis_thickness, 0.0], tex_coords: [0.0, 0.0], normal: [0.0, 0.0, 1.0] },
+        Vertex { position: [axis_thickness, -axis_thickness, 1.0], tex_coords: [0.0, 0.0], normal: [0.0, 0.0, 1.0] },
+        Vertex { position: [axis_thickness, -axis_thickness, 0.0], tex_coords: [0.0, 0.0], normal: [0.0, 0.0, 1.0] },
+        
+        // Third triangle
+        Vertex { position: [-axis_thickness, axis_thickness, 0.0], tex_coords: [0.0, 0.0], normal: [0.0, 0.0, 1.0] },
+        Vertex { position: [-axis_thickness, axis_thickness, 1.0], tex_coords: [0.0, 0.0], normal: [0.0, 0.0, 1.0] },
+        Vertex { position: [axis_thickness, axis_thickness, 1.0], tex_coords: [0.0, 0.0], normal: [0.0, 0.0, 1.0] },
+        
+        // Fourth triangle
+        Vertex { position: [-axis_thickness, axis_thickness, 0.0], tex_coords: [0.0, 0.0], normal: [0.0, 0.0, 1.0] },
+        Vertex { position: [axis_thickness, axis_thickness, 1.0], tex_coords: [0.0, 0.0], normal: [0.0, 0.0, 1.0] },
+        Vertex { position: [axis_thickness, axis_thickness, 0.0], tex_coords: [0.0, 0.0], normal: [0.0, 0.0, 1.0] },
+        
+        // Z-axis arrow tip (pyramid at the end)
+        // First triangle (bottom face)
+        Vertex { position: [-axis_thickness, -axis_thickness, 1.0], tex_coords: [0.0, 0.0], normal: [0.0, 0.0, 1.0] },
+        Vertex { position: [-axis_thickness, axis_thickness, 1.0], tex_coords: [0.0, 0.0], normal: [0.0, 0.0, 1.0] },
+        Vertex { position: [0.0, 0.0, 1.0 + arrow_size], tex_coords: [0.0, 0.0], normal: [0.0, 0.0, 1.0] },
+        
+        // Second triangle (top face)
+        Vertex { position: [axis_thickness, -axis_thickness, 1.0], tex_coords: [0.0, 0.0], normal: [0.0, 0.0, 1.0] },
+        Vertex { position: [axis_thickness, axis_thickness, 1.0], tex_coords: [0.0, 0.0], normal: [0.0, 0.0, 1.0] },
+        Vertex { position: [0.0, 0.0, 1.0 + arrow_size], tex_coords: [0.0, 0.0], normal: [0.0, 0.0, 1.0] },
+        
+        // Third triangle (left face)
+        Vertex { position: [-axis_thickness, -axis_thickness, 1.0], tex_coords: [0.0, 0.0], normal: [0.0, 0.0, 1.0] },
+        Vertex { position: [axis_thickness, -axis_thickness, 1.0], tex_coords: [0.0, 0.0], normal: [0.0, 0.0, 1.0] },
+        Vertex { position: [0.0, 0.0, 1.0 + arrow_size], tex_coords: [0.0, 0.0], normal: [0.0, 0.0, 1.0] },
+        
+        // Fourth triangle (right face)
+        Vertex { position: [-axis_thickness, axis_thickness, 1.0], tex_coords: [0.0, 0.0], normal: [0.0, 0.0, 1.0] },
+        Vertex { position: [axis_thickness, axis_thickness, 1.0], tex_coords: [0.0, 0.0], normal: [0.0, 0.0, 1.0] },
+        Vertex { position: [0.0, 0.0, 1.0 + arrow_size], tex_coords: [0.0, 0.0], normal: [0.0, 0.0, 1.0] },
     ];
     
     device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
