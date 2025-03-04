@@ -3,6 +3,7 @@ pub mod vertex;
 pub mod render_device;
 pub mod system_info;
 pub mod state;
+pub mod debug;
 
 // Constants for the application
 pub const WINDOW_TITLE: &str = "Minecraft Block Renderer";

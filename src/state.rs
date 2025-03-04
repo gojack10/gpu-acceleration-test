@@ -1,5 +1,5 @@
 use anyhow::Result;
-use glam::{Mat4, Quat, Vec3, Vec4};
+use glam::{Mat4, Quat, Vec3};
 use std::{sync::Arc, time::Instant};
 use wgpu::util::DeviceExt;
 use winit::{
@@ -9,7 +9,7 @@ use winit::{
     keyboard::{KeyCode, PhysicalKey},
     event::ElementState,
 };
-use egui::{pos2, Color32, Pos2, Align2};
+use egui;
 use log::debug;
 
 // For egui_wgpu_backend
@@ -22,6 +22,7 @@ use crate::{
     vertex::{Vertex, Uniforms, create_cube_vertices},
     render_device::RenderDevice,
     system_info::SystemInfo,
+    debug::DebugState,
 };
 
 pub struct State {
@@ -48,7 +49,7 @@ pub struct State {
     pub last_update: Instant,
     pub render_device: RenderDevice,
     pub system_info: SystemInfo,
-    pub debug_mode: bool,
+    pub debug_state: DebugState,
     pub debug_axis_buffer: Option<wgpu::Buffer>,
     pub debug_axis_pipeline: Option<wgpu::RenderPipeline>,
     pub world_axis_buffer: Option<wgpu::Buffer>,
@@ -56,6 +57,8 @@ pub struct State {
     pub world_axis_uniform_buffer: Option<wgpu::Buffer>,
     pub debug_axis_positions: Vec<Vec3>,
     pub world_axis_positions: Vec<Vec3>,
+    pub cube_position: Vec3,
+    pub cube_velocity: Vec3,
 }
 
 impl State {
@@ -403,7 +406,7 @@ impl State {
             last_update: Instant::now(),
             render_device,
             system_info,
-            debug_mode: false,
+            debug_state: DebugState::default(),
             debug_axis_buffer: Some(debug_axis_buffer),
             debug_axis_pipeline: Some(debug_axis_pipeline),
             world_axis_buffer: Some(world_axis_buffer),
@@ -411,6 +414,8 @@ impl State {
             world_axis_uniform_buffer: Some(world_axis_uniform_buffer),
             debug_axis_positions,
             world_axis_positions,
+            cube_position: Vec3::ZERO,
+            cube_velocity: Vec3::ZERO,
         })
     }
 
@@ -425,17 +430,23 @@ impl State {
     }
 
     pub fn input(&mut self, event: &WindowEvent) -> bool {
+        // First check if debug state wants to handle this input
+        debug!("State received window event: {:?}", event);
+        if self.debug_state.handle_input(event) {
+            debug!("Debug state handled the event");
+            return true;
+        }
+
         match event {
             WindowEvent::KeyboardInput { 
                 event: winit::event::KeyEvent {
-                    physical_key: PhysicalKey::Code(KeyCode::KeyD),
+                    physical_key: PhysicalKey::Code(KeyCode::Space),
                     state: ElementState::Pressed,
                     ..
                 },
                 ..
             } => {
-                self.debug_mode = !self.debug_mode;
-                debug!("Debug mode: {}", self.debug_mode);
+                // Handle space key
                 true
             },
             WindowEvent::Resized(physical_size) => {
@@ -462,6 +473,24 @@ impl State {
 
         // Update rotation
         self.rotation += dt.as_secs_f32();
+
+        // Update debug state
+        self.debug_state.update();
+
+        // Update cube position and velocity (for debug display)
+        // In this example, we'll just use a simple orbit
+        let orbit_radius = 1.0;
+        self.cube_position = Vec3::new(
+            orbit_radius * self.rotation.sin(),
+            0.0,
+            orbit_radius * self.rotation.cos()
+        );
+        
+        self.cube_velocity = Vec3::new(
+            orbit_radius * self.rotation.cos(),
+            0.0,
+            -orbit_radius * self.rotation.sin()
+        );
 
         // Calculate aspect ratio
         let aspect = self.config.width as f32 / self.config.height as f32;
@@ -511,7 +540,7 @@ impl State {
         );
 
         // Update debug world axis uniform if in debug mode
-        if self.debug_mode && self.world_axis_uniform_buffer.is_some() {
+        if self.debug_state.enabled && self.world_axis_uniform_buffer.is_some() {
             // Create a special transform for the world axes at bottom left
             let aspect = self.config.width as f32 / self.config.height as f32;
             
@@ -601,9 +630,9 @@ impl State {
             render_pass.draw_indexed(0..self.num_indices, 0, 0..1);
             
             // Draw debug axes if in debug mode
-            if self.debug_mode && 
-               self.debug_axis_buffer.is_some() && 
-               self.debug_axis_pipeline.is_some() {
+            if self.debug_state.enabled && 
+                self.debug_axis_buffer.is_some() && 
+                self.debug_axis_pipeline.is_some() {
                 // 1. Draw object-attached axes
                 render_pass.set_pipeline(self.debug_axis_pipeline.as_ref().unwrap());
                 render_pass.set_bind_group(0, &self.uniform_bind_group, &[]);
@@ -621,8 +650,8 @@ impl State {
         
         // Get matrices for label positioning
         let aspect = self.config.width as f32 / self.config.height as f32;
-        let proj = Mat4::perspective_rh(45.0_f32.to_radians(), aspect, 0.1, 100.0);
-        let camera_view = Mat4::look_at_rh(
+        let _proj = Mat4::perspective_rh(45.0_f32.to_radians(), aspect, 0.1, 100.0);
+        let _camera_view = Mat4::look_at_rh(
             Vec3::new(0.0, 1.5, 3.0),
             Vec3::new(0.0, 0.0, 0.0),
             Vec3::new(0.0, 1.0, 0.0),
@@ -633,7 +662,7 @@ impl State {
         let model = Mat4::from_quat(rotation);
         
         // Calculate world positions of object-attached axes
-        let rotated_axis_positions: Vec<Vec3> = self.debug_axis_positions.iter()
+        let _rotated_axis_positions: Vec<Vec3> = self.debug_axis_positions.iter()
             .map(|pos| model.transform_point3(*pos))
             .collect();
         
@@ -656,7 +685,7 @@ impl State {
         let _world_mvp = ortho * world_axis_model; // Prefix with underscore to indicate intentionally unused
         
         // Create scaled world axis positions
-        let scaled_world_positions: Vec<Vec3> = self.world_axis_positions.iter()
+        let _scaled_world_positions: Vec<Vec3> = self.world_axis_positions.iter()
             .map(|pos| {
                 let scaled_pos = *pos * scale;
                 Vec3::new(scaled_pos.x + x_pos, scaled_pos.y + y_pos, scaled_pos.z)
@@ -674,150 +703,55 @@ impl State {
         
         let raw_input = self.egui_state.take_egui_input(self.window.as_ref());
         let full_output = egui_context.run(raw_input, |ctx| {
-            egui::Window::new("Stats").show(ctx, |ui| {
-                ui.label(format!("FPS: {:.1}", self.fps));
-                ui.label(format!("Frame Time: {:.2} ms", 1000.0 / self.fps));
-                ui.label(format!("Rendering Device: {}", self.render_device));
-                
-                ui.separator();
-                
-                ui.heading("CPU Information");
-                if !self.system_info.cpus.is_empty() {
-                    ui.label(&self.system_info.cpus[self.system_info.selected_cpu]);
-                }
-                
-                ui.separator();
-                
-                ui.heading("GPU Information");
-                if self.system_info.selected_gpu < self.system_info.gpus.len() {
-                    ui.label(&self.system_info.gpus[self.system_info.selected_gpu]);
-                }
-            });
-            
-            // Render axis labels if in debug mode
-            if self.debug_mode {
-                // Helper function to project 3D point to 2D screen space
-                let project_point = |point: Vec3, mvp: Mat4| -> Option<Pos2> {
-                    // Transform point to clip space
-                    let clip_pos = mvp * Vec4::new(point.x, point.y, point.z, 1.0);
-                    
-                    // Check if point is behind camera
-                    if clip_pos.w <= 0.0 {
-                        return None;
-                    }
-                    
-                    // Convert to normalized device coordinates
-                    let ndc = Vec3::new(
-                        clip_pos.x / clip_pos.w,
-                        clip_pos.y / clip_pos.w,
-                        clip_pos.z / clip_pos.w
-                    );
-                    
-                    // Convert to screen coordinates
-                    let screen_x = (ndc.x + 1.0) * 0.5 * self.config.width as f32;
-                    let screen_y = (1.0 - ndc.y) * 0.5 * self.config.height as f32; // Y is flipped
-                    
-                    Some(pos2(screen_x, screen_y))
-                };
-                
-                // Project object-attached axis positions to screen space
-                let mvp = proj * camera_view * model;
-                
-                let _axis_labels = ["X", "Y", "Z"];
-                let axis_colors = [Color32::RED, Color32::GREEN, Color32::BLUE];
-                let axis_descriptions = ["Roll (X)", "Pitch (Y)", "Yaw (Z)"];
-                let axis_symbols = ["↻", "↑↓", "↺"];
-                
-                // Draw object axis labels
-                for (i, pos) in rotated_axis_positions.iter().enumerate() {
-                    if let Some(screen_pos) = project_point(*pos, mvp) {
-                        // Draw axis label with enhanced information
-                        egui::Area::new(egui::Id::new(format!("axis_label_{}", i)))
-                            .movable(false)
-                            .anchor(Align2::CENTER_CENTER, egui::Vec2::new(screen_pos.x, screen_pos.y))
-                            .show(ctx, |ui| {
-                                ui.vertical_centered(|ui| {
-                                    // Draw a colored background for better visibility
-                                    let text_color = Color32::WHITE;
-                                    let bg_color = axis_colors[i].linear_multiply(0.8);
-                                    
-                                    // Create a frame with the axis color as background
-                                    egui::Frame::none()
-                                        .fill(bg_color)
-                                        .rounding(5.0)
-                                        .stroke(egui::Stroke::new(1.0, Color32::WHITE))
-                                        .inner_margin(8.0) // Use a simple float value instead of Margin
-                                        .show(ui, |ui| {
-                                            ui.vertical_centered(|ui| {
-                                                // Add the axis symbol (rotation indicator)
-                                                ui.label(egui::RichText::new(axis_symbols[i])
-                                                    .size(20.0)
-                                                    .color(text_color)
-                                                    .strong());
-                                                
-                                                // Add the axis label and description
-                                                ui.label(egui::RichText::new(axis_descriptions[i])
-                                                    .size(14.0)
-                                                    .color(text_color)
-                                                    .strong());
-                                            });
-                                        });
-                                });
-                            });
-                    }
-                }
-                
-                // Project world axis positions to screen space
-                for (i, pos) in scaled_world_positions.iter().enumerate() {
-                    // For world axes in the corner, we need orthographic projection
-                    if let Some(screen_pos) = project_point(*pos, ortho) {
-                        // Draw world axis label with enhanced information
-                        egui::Area::new(egui::Id::new(format!("world_axis_label_{}", i)))
-                            .movable(false)
-                            .anchor(Align2::CENTER_CENTER, egui::Vec2::new(screen_pos.x, screen_pos.y))
-                            .show(ctx, |ui| {
-                                ui.vertical_centered(|ui| {
-                                    // Draw a colored background for better visibility
-                                    let text_color = Color32::WHITE;
-                                    let bg_color = axis_colors[i].linear_multiply(0.8);
-                                    
-                                    // Create a frame with the axis color as background
-                                    egui::Frame::none()
-                                        .fill(bg_color)
-                                        .rounding(5.0)
-                                        .stroke(egui::Stroke::new(1.0, Color32::WHITE))
-                                        .inner_margin(6.0) // Use a simple float value instead of Margin
-                                        .show(ui, |ui| {
-                                            ui.vertical_centered(|ui| {
-                                                // Add the axis symbol (rotation indicator)
-                                                ui.label(egui::RichText::new(axis_symbols[i])
-                                                    .size(16.0)
-                                                    .color(text_color)
-                                                    .strong());
-                                                
-                                                // Add the axis label and description
-                                                ui.label(egui::RichText::new(axis_descriptions[i])
-                                                    .size(12.0)
-                                                    .color(text_color)
-                                                    .strong());
-                                            });
-                                        });
-                                });
-                            });
-                    }
-                }
-            }
+            // Always render debug information using our debug state
+            // This will now show both text panels regardless of debug state
+            self.debug_state.render(
+                ctx,
+                self.fps,
+                &self.render_device,
+                &self.system_info,
+                (self.config.width, self.config.height),
+                self.rotation,
+                self.cube_position,
+                self.cube_velocity,
+            );
         });
         
         // Handle egui output and render
         self.egui_state.handle_platform_output(self.window.as_ref(), full_output.platform_output);
+        
+        // Check if shapes were actually generated
+        println!("Shapes count from egui output: {}", full_output.shapes.len());
+        if full_output.shapes.is_empty() {
+            println!("WARNING: No shapes generated by egui!");
+        }
+        
+        // Now tessellate the shapes into paint jobs
         let paint_jobs = egui_context.tessellate(full_output.shapes, 1.0);
         
-        // Add debug logging
-        debug!("Paint jobs type: {:?}", std::any::type_name_of_val(&paint_jobs));
-        debug!("Egui renderer expected type: egui_wgpu_backend::renderer::ClippedPrimitive");
-        debug!("First paint job element type (if any): {:?}", 
-               paint_jobs.first().map(|_| std::any::type_name_of_val(paint_jobs.first().unwrap())));
+        // Enhanced debugging for paint jobs
+        println!("=== EGUI DEBUGGING ===");
+        println!("Number of paint jobs: {}", paint_jobs.len());
+        
+        if paint_jobs.is_empty() {
+            println!("WARNING: No paint jobs generated - UI won't be visible!");
+        } else {
+            println!("Paint jobs generated successfully");
+            
+            // Log details of the first few paint jobs for inspection
+            for (i, job) in paint_jobs.iter().take(3).enumerate() {
+                println!("Paint job #{}: With clip rectangle: {:?}", i, job.clip_rect);
+                
+                // Just print the type name since we don't know the exact structure
+                println!("  Primitive type: {}", std::any::type_name_of_val(&job.primitive));
+            }
+        }
+        
+        // Debug screen descriptor
+        println!("Screen descriptor - Width: {}, Height: {}, Scale: {}", 
+            screen_descriptor.physical_width, 
+            screen_descriptor.physical_height,
+            screen_descriptor.scale_factor);
         
         // Update egui
         self.egui_renderer.update_buffers(
@@ -826,15 +760,40 @@ impl State {
             paint_jobs.as_slice(),
             &screen_descriptor,
         );
+        
+        println!("Buffer update completed");
+
+        // Add textures from egui to the renderer
+        if let Err(e) = self.egui_renderer.add_textures(&self.device, &self.queue, &full_output.textures_delta) {
+            println!("Failed to add textures to renderer: {:?}", e);
+        }
 
         // Render egui
-        let _ = self.egui_renderer.execute(
+        let render_result = self.egui_renderer.execute(
             &mut encoder,
             &view,
             paint_jobs.as_slice(),
             &screen_descriptor,
             None,
         );
+        
+        match &render_result {
+            Ok(_) => println!("Renderer execution: Success"),
+            Err(e) => {
+                println!("Renderer execution: Failed");
+                println!("Error details: {:?}", e);
+                
+                // Try to recover if possible - at this point the command buffer might be corrupted
+                // Let's submit what we have and continue
+            }
+        }
+        
+        // Free textures that are no longer needed
+        if let Err(e) = self.egui_renderer.remove_textures(full_output.textures_delta) {
+            println!("Failed to remove textures from renderer: {:?}", e);
+        }
+        
+        println!("=== EGUI DEBUGGING END ===");
         
         // Submit command buffer
         self.queue.submit(std::iter::once(encoder.finish()));
