@@ -57,6 +57,10 @@ impl ApplicationHandler for App {
                         WindowEvent::CloseRequested => {
                             // We'll handle exit in the about_to_wait method
                         },
+                        WindowEvent::Resized(physical_size) => {
+                            // Ensure resize is handled even if state.input doesn't handle it
+                            state.resize(physical_size);
+                        },
                         _ => {}
                     }
                 }
@@ -100,7 +104,8 @@ fn main() -> Result<()> {
     // Create window attributes
     let window_attributes = WindowAttributes::default()
         .with_title(WINDOW_TITLE)
-        .with_inner_size(winit::dpi::PhysicalSize::new(WINDOW_WIDTH, WINDOW_HEIGHT));
+        .with_inner_size(winit::dpi::PhysicalSize::new(WINDOW_WIDTH, WINDOW_HEIGHT))
+        .with_resizable(true);
     
     // Create wgpu instance for system info
     let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {

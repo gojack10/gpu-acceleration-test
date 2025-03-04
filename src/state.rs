@@ -438,6 +438,10 @@ impl State {
                 debug!("Debug mode: {}", self.debug_mode);
                 true
             },
+            WindowEvent::Resized(physical_size) => {
+                self.resize(*physical_size);
+                true
+            },
             _ => false,
         }
     }
@@ -459,11 +463,16 @@ impl State {
         // Update rotation
         self.rotation += dt.as_secs_f32();
 
-        // Create projection matrix
+        // Calculate aspect ratio
         let aspect = self.config.width as f32 / self.config.height as f32;
-        let proj = Mat4::perspective_rh(45.0_f32.to_radians(), aspect, 0.1, 100.0);
         
-        // Create view matrix
+        // Create projection matrix
+        // Use a fixed field of view to maintain consistent perspective
+        let fov = 45.0_f32.to_radians();
+        let proj = Mat4::perspective_rh(fov, aspect, 0.1, 100.0);
+        
+        // Create view matrix with fixed camera position
+        // This ensures the cube stays at a constant distance from the camera
         let view = Mat4::look_at_rh(
             Vec3::new(0.0, 1.5, 3.0),
             Vec3::new(0.0, 0.0, 0.0),
@@ -506,8 +515,12 @@ impl State {
             // Create a special transform for the world axes at bottom left
             let aspect = self.config.width as f32 / self.config.height as f32;
             
+            // Calculate scale factor based on window size for consistent UI scaling
+            let min_dimension = self.config.width.min(self.config.height) as f32;
+            let scale_factor = min_dimension / 768.0; // Base scale on reference size of 768
+            
             // Scale and position the axes in the bottom left corner
-            let scale = 0.15; // Scale of the axes
+            let scale = 0.15 * scale_factor; // Scale of the axes, also affected by window size
             let x_pos = -0.85; // Position in NDC (-1 to 1)
             let y_pos = -0.85;
             
@@ -624,8 +637,12 @@ impl State {
             .map(|pos| model.transform_point3(*pos))
             .collect();
         
+        // Calculate scale factor based on window size for consistent UI scaling
+        let min_dimension = self.config.width.min(self.config.height) as f32;
+        let scale_factor = min_dimension / 768.0; // Base scale on reference size of 768
+        
         // World axis positions in screen space (for bottom left corner)
-        let scale = 0.15;
+        let scale = 0.15 * scale_factor;
         let x_pos = -0.85;
         let y_pos = -0.85;
         
