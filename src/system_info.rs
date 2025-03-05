@@ -158,7 +158,7 @@ pub fn get_system_info(instance: &wgpu::Instance) -> SystemInfo {
         vram_used: 0,         // Will need to be updated during runtime
         vram_total: 0,        // Will need to be updated during runtime
         api_backend,
-        vsync_enabled: true,  // Default to vsync enabled
+        vsync_enabled: false,
     }
 }
 

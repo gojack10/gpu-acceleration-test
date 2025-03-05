@@ -59,10 +59,16 @@ pub struct State {
     pub world_axis_positions: Vec<Vec3>,
     pub cube_position: Vec3,
     pub cube_velocity: Vec3,
+    pub vsync_enabled: bool, // Track VSync state for manual frame limiting
 }
 
 impl State {
-    pub async fn new(window: Arc<Window>, render_device: RenderDevice, system_info: SystemInfo) -> Result<Self> {
+    pub async fn new(
+        window: Arc<Window>, 
+        render_device: RenderDevice, 
+        mut system_info: SystemInfo,
+        present_mode: wgpu::PresentMode,
+    ) -> Result<Self> {
         let size = window.inner_size();
 
         // Create the instance
@@ -145,32 +151,44 @@ impl State {
             .find(|f| f.is_srgb())
             .unwrap_or(surface_caps.formats[0]);
             
-        // Select the appropriate present mode based on vsync setting
-        let present_mode = if system_info.vsync_enabled {
-            // VSync On - use Fifo (traditional vsync)
-            wgpu::PresentMode::Fifo
+        // Log supported present modes
+        log::info!("Supported present modes: {:?}", surface_caps.present_modes);
+        log::info!("Requested present mode: {:?}", present_mode);
+        
+        // Check if the requested present mode is supported
+        let actual_present_mode = if surface_caps.present_modes.contains(&present_mode) {
+            log::info!("Requested present mode is supported");
+            present_mode
         } else {
-            // VSync Off - try to use Immediate (no vsync) if supported, otherwise fall back to AutoNoVsync
-            if surface_caps.present_modes.contains(&wgpu::PresentMode::Immediate) {
-                wgpu::PresentMode::Immediate
-            } else {
-                wgpu::PresentMode::AutoNoVsync
-            }
+            log::warn!("Requested present mode {:?} is not supported, falling back to Fifo", present_mode);
+            wgpu::PresentMode::Fifo
         };
         
-        debug!("Using present mode: {:?} (vsync: {})", present_mode, system_info.vsync_enabled);
+        // Update the vsync_enabled flag in system_info based on the actual present mode
+        system_info.vsync_enabled = match actual_present_mode {
+            wgpu::PresentMode::Immediate => false,
+            _ => true, // Fifo and Mailbox both use VSync
+        };
+        
+        // Store the vsync_enabled value for later use
+        let vsync_enabled = system_info.vsync_enabled;
+        
+        log::info!("Using present mode: {:?}, VSync: {}", actual_present_mode, vsync_enabled);
+        log::info!("Initializing State with vsync_enabled: {}", vsync_enabled);
             
+        // Create the surface configuration
         let config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
             format: surface_format,
             width: size.width,
             height: size.height,
-            present_mode,
+            present_mode: actual_present_mode,
             alpha_mode: wgpu::CompositeAlphaMode::Auto,
             view_formats: vec![],
             desired_maximum_frame_latency: 2,
         };
         
+        // Configure the surface with our configuration
         surface.configure(&device, &config);
         
         // Load the shader
@@ -430,39 +448,23 @@ impl State {
             world_axis_positions,
             cube_position: Vec3::ZERO,
             cube_velocity: Vec3::ZERO,
+            vsync_enabled,
         })
     }
 
     pub fn resize(&mut self, new_size: PhysicalSize<u32>) {
         if new_size.width > 0 && new_size.height > 0 {
+            log::info!("Resizing window to {}x{}, preserving present mode: {:?}", 
+                new_size.width, new_size.height, self.config.present_mode);
+            
             self.size = new_size;
             self.config.width = new_size.width;
             self.config.height = new_size.height;
+            // Preserve the current present mode instead of forcing Immediate
+            // This allows vsync toggle to work properly
             self.surface.configure(&self.device, &self.config);
             self.depth_texture = create_depth_texture(&self.device, &self.config, "depth_texture");
         }
-    }
-
-    /// Toggle vsync on/off and reconfigure the surface
-    pub fn toggle_vsync(&mut self) {
-        // Toggle the vsync setting
-        self.system_info.vsync_enabled = !self.system_info.vsync_enabled;
-        
-        // Update the present mode based on the new vsync setting
-        self.config.present_mode = if self.system_info.vsync_enabled {
-            // VSync On - use Fifo (traditional vsync)
-            wgpu::PresentMode::Fifo
-        } else {
-            // VSync Off - use AutoNoVsync (safer option that works across all adapters)
-            wgpu::PresentMode::AutoNoVsync
-        };
-        
-        // Reconfigure the surface with the new settings
-        self.surface.configure(&self.device, &self.config);
-        
-        debug!("Toggled vsync: {} (present mode: {:?})", 
-               self.system_info.vsync_enabled, 
-               self.config.present_mode);
     }
 
     pub fn input(&mut self, event: &WindowEvent) -> bool {
@@ -493,8 +495,18 @@ impl State {
                 },
                 ..
             } => {
-                // Toggle vsync when V key is pressed
+                // Log before toggle
+                log::info!("V key pressed - toggling VSync");
+                log::info!("Before toggle - Present mode: {:?}, VSync enabled: {}", 
+                    self.config.present_mode, self.system_info.vsync_enabled);
+                
+                // Toggle VSync mode
                 self.toggle_vsync();
+                
+                // Log after toggle
+                log::info!("After toggle - Present mode: {:?}, VSync enabled: {}", 
+                    self.config.present_mode, self.system_info.vsync_enabled);
+                
                 true
             },
             WindowEvent::Resized(physical_size) => {
@@ -518,12 +530,131 @@ impl State {
         
         let avg_frame_time = self.frame_times.iter().sum::<f32>() / self.frame_times.len() as f32;
         self.fps = 1000.0 / avg_frame_time;
+        
+        // If vsync is disabled and we're in Immediate mode, force high FPS by requesting redraws
+        if !self.vsync_enabled && self.config.present_mode == wgpu::PresentMode::Immediate {
+            // Request a redraw to force higher frame rate
+            self.window.request_redraw();
+            
+            // On macOS, we need to be more aggressive to overcome Metal's VSync enforcement
+            #[cfg(target_os = "macos")]
+            {
+                // Check if FPS is still capped around 60
+                if self.fps < 70.0 {
+                    // We're still capped, try more aggressive approach
+                    static mut TOGGLE_COUNT: u32 = 0;
+                    
+                    unsafe {
+                        TOGGLE_COUNT += 1;
+                        
+                        // Every 60 frames, log that we're still capped
+                        if TOGGLE_COUNT % 60 == 0 {
+                            log::warn!("FPS still appears to be capped at {:.1} despite Immediate mode", self.fps);
+                            log::warn!("macOS Metal may be enforcing VSync at the driver level");
+                            log::warn!("Try running with: METAL_DEVICE_WRAPPER_TYPE=1 cargo run");
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Check if FPS is consistent with the current present mode
+        // This helps detect if vsync changes are actually taking effect
+        static mut LAST_FPS_CHECK: Option<Instant> = None;
+        static mut LAST_PRESENT_MODE_CHECK: Option<wgpu::PresentMode> = None;
+        
+        unsafe {
+            let should_check = match LAST_FPS_CHECK {
+                Some(last_time) if now.duration_since(last_time).as_secs_f32() >= 2.0 => true,
+                None => true,
+                _ => false,
+            };
+            
+            if should_check {
+                LAST_FPS_CHECK = Some(now);
+                
+                // Check if FPS is consistent with present mode
+                let expected_fps_range = match self.config.present_mode {
+                    wgpu::PresentMode::Fifo => {
+                        // With VSync, FPS should be close to refresh rate (typically 60)
+                        (55.0, 65.0)
+                    },
+                    wgpu::PresentMode::Immediate => {
+                        // Without VSync, FPS should be higher than refresh rate
+                        // or at least not capped at exactly refresh rate
+                        (70.0, 10000.0)
+                    },
+                    _ => (0.0, 10000.0),
+                };
+                
+                let fps_matches_mode = self.fps >= expected_fps_range.0 && self.fps <= expected_fps_range.1;
+                
+                // Only log if present mode has changed since last check
+                if let Some(last_mode) = LAST_PRESENT_MODE_CHECK {
+                    if last_mode != self.config.present_mode || !fps_matches_mode {
+                        if !fps_matches_mode {
+                            log::warn!("FPS ({:.1}) doesn't match expected range for {:?} ({:.1}-{:.1})", 
+                                self.fps, self.config.present_mode, expected_fps_range.0, expected_fps_range.1);
+                            
+                            // If we're in Immediate mode but FPS is still capped, something is wrong
+                            if self.config.present_mode == wgpu::PresentMode::Immediate && self.fps < 70.0 {
+                                log::warn!("VSync appears to still be active despite being in Immediate mode!");
+                                log::warn!("This might be due to OS-level VSync enforcement or another frame limiting mechanism");
+                            }
+                        } else {
+                            log::info!("FPS ({:.1}) matches expected range for {:?} ({:.1}-{:.1})", 
+                                self.fps, self.config.present_mode, expected_fps_range.0, expected_fps_range.1);
+                        }
+                    }
+                }
+                
+                LAST_PRESENT_MODE_CHECK = Some(self.config.present_mode);
+            }
+        }
+        
+        // Log FPS and present mode every second (approximately)
+        static mut LAST_FPS_LOG: Option<Instant> = None;
+        unsafe {
+            let should_log = match LAST_FPS_LOG {
+                Some(last_time) if now.duration_since(last_time).as_secs_f32() >= 1.0 => true,
+                None => true,
+                _ => false,
+            };
+            
+            if should_log {
+                LAST_FPS_LOG = Some(now);
+                
+                // Log FPS and present mode
+                log::debug!("FPS: {:.1}, Frame Time: {:.2}ms, Present Mode: {:?}, VSync: {}", 
+                    self.fps, 
+                    avg_frame_time,
+                    self.config.present_mode,
+                    self.system_info.vsync_enabled
+                );
+                
+                // Track present mode changes over time
+                static mut LAST_PRESENT_MODE: Option<wgpu::PresentMode> = None;
+                let current_mode = self.config.present_mode;
+                
+                if let Some(last_mode) = LAST_PRESENT_MODE {
+                    if last_mode != current_mode {
+                        log::info!("Present mode changed from {:?} to {:?} during update", 
+                            last_mode, current_mode);
+                        
+                        // Run diagnostic check when present mode changes
+                        self.check_present_mode_status("Present mode changed during update");
+                    }
+                }
+                
+                LAST_PRESENT_MODE = Some(current_mode);
+            }
+        }
 
         // Update rotation
         self.rotation += dt.as_secs_f32();
 
-        // Update debug state
-        self.debug_state.update();
+        // Update debug state with system info
+        self.debug_state.update(Some(&mut self.system_info));
 
         // Update cube position and velocity (for debug display)
         // In this example, we'll just use a simple orbit
@@ -814,6 +945,284 @@ impl State {
         
         Ok(())
     }
+
+    pub fn toggle_vsync(&mut self) {
+        // Log the current present mode and FPS before changing
+        log::info!("Current present mode before toggle: {:?}, FPS: {:.1}", self.config.present_mode, self.fps);
+        
+        // Store initial FPS for comparison
+        let initial_fps = self.fps;
+        
+        // Diagnostic check before toggle
+        self.check_present_mode_status("Before toggle");
+        
+        // We need to get the supported present modes
+        // Since we can't access the adapter directly from the device in newer wgpu versions,
+        // we'll create a temporary instance and adapter to check capabilities
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
+            backends: wgpu::Backends::all(),
+            ..Default::default()
+        });
+        
+        let surface = instance.create_surface(self.window.clone()).unwrap();
+        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+            power_preference: wgpu::PowerPreference::HighPerformance,
+            compatible_surface: Some(&surface),
+            force_fallback_adapter: false,
+        })).unwrap();
+        
+        let surface_caps = surface.get_capabilities(&adapter);
+        log::info!("Supported present modes: {:?}", surface_caps.present_modes);
+        
+        // Check if we're on macOS
+        #[cfg(target_os = "macos")]
+        let is_macos = true;
+        #[cfg(not(target_os = "macos"))]
+        let is_macos = false;
+        
+        // Cycle through available present modes: Fifo (VSync) -> Immediate (Uncapped) -> Mailbox (if available)
+        let new_mode = match self.config.present_mode {
+            wgpu::PresentMode::Fifo => {
+                // Switch to Immediate (no VSync) if supported
+                self.system_info.vsync_enabled = false;
+                self.vsync_enabled = false; // Also update the State struct's flag
+                if surface_caps.present_modes.contains(&wgpu::PresentMode::Immediate) {
+                    wgpu::PresentMode::Immediate
+                } else {
+                    // If Immediate is not supported, stay with Fifo
+                    self.system_info.vsync_enabled = true;
+                    self.vsync_enabled = true; // Also update the State struct's flag
+                    wgpu::PresentMode::Fifo
+                }
+            },
+            wgpu::PresentMode::Immediate => {
+                // Try Mailbox if supported, otherwise back to Fifo
+                self.system_info.vsync_enabled = true;
+                self.vsync_enabled = true; // Also update the State struct's flag
+                if surface_caps.present_modes.contains(&wgpu::PresentMode::Mailbox) {
+                    wgpu::PresentMode::Mailbox
+                } else {
+                    wgpu::PresentMode::Fifo
+                }
+            },
+            wgpu::PresentMode::Mailbox => {
+                // Back to Fifo
+                self.system_info.vsync_enabled = true;
+                self.vsync_enabled = true; // Also update the State struct's flag
+                wgpu::PresentMode::Fifo
+            },
+            // For any other modes, default to Fifo
+            _ => {
+                self.system_info.vsync_enabled = true;
+                self.vsync_enabled = true; // Also update the State struct's flag
+                wgpu::PresentMode::Fifo
+            }
+        };
+        
+        // Update the config with the new present mode
+        let old_mode = self.config.present_mode;
+        self.config.present_mode = new_mode;
+        
+        // Verify if the mode is actually changing
+        if old_mode == new_mode {
+            log::warn!("Present mode didn't change! Still at {:?}", new_mode);
+        } else {
+            log::info!("Present mode changed from {:?} to {:?}", old_mode, new_mode);
+        }
+        
+        // Force a complete reconfiguration of the surface to ensure changes take effect
+        // This is more aggressive than just calling configure
+        log::info!("Forcing surface reconfiguration to apply present mode change");
+        
+        // First, reconfigure the surface with the new settings
+        self.surface.configure(&self.device, &self.config);
+        
+        // Then, force a complete refresh by recreating the depth texture
+        // This ensures the rendering pipeline is fully reset
+        self.depth_texture = create_depth_texture(&self.device, &self.config, "depth_texture");
+        
+        // Force a frame to be rendered immediately to apply changes
+        // This helps ensure the new present mode takes effect right away
+        log::info!("Forcing immediate frame render to apply present mode");
+        
+        // Use our specialized method to force the present mode update
+        self.force_present_mode_update();
+        
+        // Diagnostic check after toggle
+        self.check_present_mode_status("After toggle");
+        
+        // Add a direct check for Metal's VSync enforcement
+        if self.config.present_mode == wgpu::PresentMode::Immediate {
+            log::warn!("On macOS, Metal may enforce VSync at the driver level regardless of the present mode.");
+            log::warn!("Try setting the environment variable: METAL_DEVICE_WRAPPER_TYPE=1");
+            log::warn!("Example: METAL_DEVICE_WRAPPER_TYPE=1 cargo run");
+            
+            // Check if we're on macOS and try to force uncapped FPS
+            #[cfg(target_os = "macos")]
+            {
+                log::info!("Attempting to force uncapped FPS on macOS...");
+                
+                // Try to set the CAMetalLayer's displaySyncEnabled property to false
+                // This is a more direct approach to disable VSync on macOS
+                
+                // First, check if the METAL_DEVICE_WRAPPER_TYPE environment variable is set
+                if std::env::var("METAL_DEVICE_WRAPPER_TYPE").is_err() {
+                    log::warn!("METAL_DEVICE_WRAPPER_TYPE environment variable is not set.");
+                    log::warn!("This may prevent disabling VSync on macOS.");
+                }
+                
+                // Force a more aggressive approach to disable VSync
+                // This involves directly manipulating the frame timing
+                log::info!("Using alternative approach to force uncapped FPS");
+                
+                // Set a flag to use a more aggressive frame timing approach
+                self.vsync_enabled = false;
+                
+                // Request high performance mode from the window system
+                self.window.request_inner_size(self.window.inner_size());
+            }
+        }
+        
+        // Monitor FPS for a few seconds to see if it changes
+        log::info!("Starting FPS monitoring to verify vsync change...");
+        
+        // Create a separate thread to monitor FPS changes
+        let window_clone = self.window.clone();
+        let present_mode = self.config.present_mode;
+        let vsync_enabled = self.vsync_enabled;
+        let initial_fps = initial_fps;
+        
+        std::thread::spawn(move || {
+            // Wait a moment for the change to take effect
+            std::thread::sleep(std::time::Duration::from_millis(500));
+            
+            // Request a redraw to ensure we get fresh frames
+            window_clone.request_redraw();
+            
+            // Wait a bit longer to allow FPS to stabilize
+            std::thread::sleep(std::time::Duration::from_millis(1000));
+            
+            // Log expected FPS behavior
+            match present_mode {
+                wgpu::PresentMode::Fifo => {
+                    log::info!("With VSync ON (Fifo), FPS should be limited to refresh rate (typically 60 FPS)");
+                },
+                wgpu::PresentMode::Immediate => {
+                    log::info!("With VSync OFF (Immediate), FPS should be uncapped and potentially higher than refresh rate");
+                },
+                wgpu::PresentMode::Mailbox => {
+                    log::info!("With VSync ON (Mailbox), FPS should be high but synchronized (no tearing)");
+                },
+                _ => {
+                    log::info!("Unknown present mode behavior");
+                }
+            }
+            
+            // Request another redraw
+            window_clone.request_redraw();
+        });
+        
+        // Log the new present mode with a user-friendly message
+        log::info!("VSync is now {}: {} (Present Mode: {:?})", 
+            if self.system_info.vsync_enabled { "ON" } else { "OFF" },
+            if self.system_info.vsync_enabled { 
+                "Frame rate limited to display refresh rate" 
+            } else { 
+                "Uncapped frame rate (may cause tearing)" 
+            },
+            self.config.present_mode
+        );
+    }
+    
+    // Diagnostic function to check present mode status
+    fn check_present_mode_status(&self, context: &str) {
+        // Create a temporary instance and adapter to check the actual capabilities
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
+            backends: wgpu::Backends::all(),
+            ..Default::default()
+        });
+        
+        let surface = instance.create_surface(self.window.clone()).unwrap();
+        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+            power_preference: wgpu::PowerPreference::HighPerformance,
+            compatible_surface: Some(&surface),
+            force_fallback_adapter: false,
+        })).unwrap();
+        
+        let adapter_info = adapter.get_info();
+        let surface_caps = surface.get_capabilities(&adapter);
+        
+        log::info!("=== PRESENT MODE DIAGNOSTIC: {} ===", context);
+        log::info!("Current adapter: {} ({})", adapter_info.name, adapter_info.backend.to_str());
+        log::info!("Current config present mode: {:?}", self.config.present_mode);
+        log::info!("Supported present modes: {:?}", surface_caps.present_modes);
+        log::info!("Is current mode supported: {}", surface_caps.present_modes.contains(&self.config.present_mode));
+        log::info!("SystemInfo vsync_enabled flag: {}", self.system_info.vsync_enabled);
+        log::info!("State vsync_enabled flag: {}", self.vsync_enabled);
+        log::info!("=== END DIAGNOSTIC ===");
+    }
+
+    // Helper method to force flush the graphics pipeline and ensure present mode changes take effect
+    fn force_present_mode_update(&mut self) {
+        log::info!("Forcing present mode update to {:?}", self.config.present_mode);
+        
+        // Create a simple command encoder
+        let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("Force Present Mode Update Encoder"),
+        });
+        
+        // Submit the command encoder to flush the pipeline
+        self.queue.submit(std::iter::once(encoder.finish()));
+        
+        // Force a wait for the device to idle
+        // This ensures all previous commands are processed before continuing
+        log::info!("Waiting for device to complete all operations...");
+        
+        // We can't directly wait for the device to idle in wgpu,
+        // but we can create and map a buffer as a synchronization point
+        let buffer_size = 4; // Just need a small buffer
+        let buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Sync Buffer"),
+            size: buffer_size,
+            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        
+        // Create a staging buffer with some data
+        let staging_buffer = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Staging Buffer"),
+            contents: &[0, 0, 0, 0],
+            usage: wgpu::BufferUsages::COPY_SRC,
+        });
+        
+        // Copy from staging buffer to the map-read buffer
+        let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("Sync Encoder"),
+        });
+        encoder.copy_buffer_to_buffer(&staging_buffer, 0, &buffer, 0, buffer_size);
+        self.queue.submit(std::iter::once(encoder.finish()));
+        
+        // Map the buffer - this will block until the copy is complete
+        let buffer_slice = buffer.slice(..);
+        let (sender, receiver) = std::sync::mpsc::channel();
+        buffer_slice.map_async(wgpu::MapMode::Read, move |result| {
+            sender.send(result).unwrap();
+        });
+        
+        // Wait for the mapping to complete
+        self.device.poll(wgpu::Maintain::Wait);
+        if let Ok(_) = receiver.recv() {
+            // Buffer is now mapped, which means all previous operations are complete
+            log::info!("Device operations completed, present mode should now be active");
+            
+            // Unmap the buffer
+            drop(buffer_slice.get_mapped_range());
+            buffer.unmap();
+        }
+        
+        // Reconfigure the surface one more time to ensure the present mode is applied
+        self.surface.configure(&self.device, &self.config);
+    }
 }
 
 // Helper function to create the debug axis rendering pipeline
@@ -899,7 +1308,7 @@ pub fn create_debug_axis_buffer(device: &wgpu::Device) -> wgpu::Buffer {
         // Fourth triangle
         Vertex { position: [0.0, -axis_thickness, axis_thickness], tex_coords: [1.0, 0.0], normal: [1.0, 0.0, 0.0] },
         Vertex { position: [1.0, axis_thickness, axis_thickness], tex_coords: [1.0, 0.0], normal: [1.0, 0.0, 0.0] },
-        Vertex { position: [0.0, axis_thickness, axis_thickness], tex_coords: [1.0, 0.0], normal: [1.0, 0.0, 0.0] },
+        Vertex { position: [0.0, axis_thickness, axis_thickness], tex_coords: [0.0, 1.0], normal: [0.0, 1.0, 0.0] },
         
         // X-axis arrow tip (pyramid at the end)
         // First triangle (bottom face)

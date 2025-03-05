@@ -36,8 +36,21 @@ impl ApplicationHandler for App {
             self.state = Some(pollster::block_on(State::new(
                 self.window.as_ref().unwrap().clone(),
                 self.render_device.clone(),
-                self.system_info.clone()
+                self.system_info.clone(),
+                wgpu::PresentMode::Fifo // Default to VSync enabled
             )).unwrap());
+            
+            // Log initial VSync status
+            if let Some(state) = &self.state {
+                log::info!("Application started with VSync {}: {} (Press 'V' to toggle)",
+                    if state.system_info.vsync_enabled { "ON" } else { "OFF" },
+                    if state.system_info.vsync_enabled {
+                        "Frame rate limited to display refresh rate"
+                    } else {
+                        "Uncapped frame rate (may cause tearing)"
+                    }
+                );
+            }
         }
     }
     

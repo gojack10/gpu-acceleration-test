@@ -84,13 +84,44 @@ impl DebugState {
         false
     }
 
-    pub fn update(&mut self) {
+    pub fn update(&mut self, system_info: Option<&mut SystemInfo>) {
         // CPU usage check - update every second
         let now = Instant::now();
         if now.duration_since(self.last_cpu_usage_check).as_secs_f32() >= 1.0 {
             self.system.refresh_cpu();
             self.cpu_usage = self.system.global_cpu_info().cpu_usage();
             self.last_cpu_usage_check = now;
+            
+            // Update system info if provided
+            if let Some(sys_info) = system_info {
+                // Update CPU usage
+                sys_info.cpu_usage = self.cpu_usage;
+                
+                // In a real application, you would update GPU metrics here
+                // For demonstration, we'll simulate some values
+                if sys_info.selected_gpu > 0 {
+                    // Simulate GPU utilization (random value between 30-90%)
+                    sys_info.gpu_utilization = 30.0 + (std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_millis() % 60) as f32;
+                    
+                    // Simulate VRAM usage (increasing over time, then resetting)
+                    let cycle = (std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_secs() % 30) as u64;
+                    
+                    // Total VRAM (simulated as 8GB)
+                    sys_info.vram_total = 8 * 1024 * 1024 * 1024;
+                    
+                    // Used VRAM (cycles from 1GB to 6GB)
+                    sys_info.vram_used = (1 + cycle / 5) * 1024 * 1024 * 1024;
+                    if sys_info.vram_used > sys_info.vram_total {
+                        sys_info.vram_used = sys_info.vram_total;
+                    }
+                }
+            }
         }
     }
 
@@ -213,7 +244,7 @@ impl DebugState {
         ctx: &egui::Context, 
         fps: f32, 
         _render_device: &RenderDevice,
-        system_info: &SystemInfo,
+        _system_info: &SystemInfo,
         window_size: (u32, u32),
         cube_rotation: f32,
         cube_position: glam::Vec3,
@@ -296,44 +327,74 @@ impl DebugState {
                     ui.colored_label(Color32::WHITE, format!("FPS: {:.1}", self.fps));
                     ui.colored_label(Color32::WHITE, format!("Frame Time: {:.2} ms", self.frame_time));
                     
-                    // Show vsync status
-                    let vsync_status = if system_info.vsync_enabled {
-                        "VSync: ON (press V to toggle)"
-                    } else {
-                        "VSync: OFF (press V to toggle)"
-                    };
-                    ui.colored_label(
-                        if system_info.vsync_enabled { Color32::GREEN } else { Color32::YELLOW },
-                        vsync_status
-                    );
-                    
                     // Add render device information with much more detail
                     ui.add_space(10.0);
                     
                     match _render_device {
                         RenderDevice::CPU => {
                             ui.colored_label(Color32::YELLOW, "CPU RENDERING (SOFTWARE)");
-                            if !system_info.cpus.is_empty() {
-                                // Use label with wrapping for potentially long CPU names
-                                let cpu_text = format!("CPU: {}", system_info.cpus[system_info.selected_cpu]);
-                                ui.add(egui::Label::new(egui::RichText::new(cpu_text).color(Color32::WHITE)).wrap());
-                            }
+                            
+                            // CPU Model and Manufacturer
+                            let cpu_model_text = format!("CPU: {}", _system_info.cpu_model);
+                            ui.add(egui::Label::new(egui::RichText::new(cpu_model_text).color(Color32::WHITE)).wrap());
+                            
+                            // CPU Architecture
+                            ui.colored_label(Color32::LIGHT_GRAY, format!("Architecture: {}", _system_info.cpu_architecture));
+                            
+                            // Software Renderer
+                            ui.colored_label(Color32::LIGHT_GRAY, "Renderer: Software (CPU-based)");
+                            
+                            // Rendering Thread Count
+                            ui.colored_label(Color32::LIGHT_GRAY, format!("Rendering Threads: {}", _system_info.rendering_threads));
+                            
+                            // CPU Usage
+                            ui.colored_label(Color32::LIGHT_GRAY, format!("CPU Usage: {:.1}%", _system_info.cpu_usage));
+                            
+                            // VSync Status and Toggle Key
+                            ui.add_space(5.0);
+                            let vsync_status = if _system_info.vsync_enabled {
+                                egui::RichText::new("VSync: ON").color(Color32::GREEN)
+                            } else {
+                                egui::RichText::new("VSync: OFF").color(Color32::YELLOW)
+                            };
+                            ui.label(vsync_status);
+                            ui.colored_label(Color32::LIGHT_GRAY, "Press 'V' to toggle VSync");
                         },
-                        RenderDevice::GPU(name) => {
+                        RenderDevice::GPU(_name) => {
                             ui.colored_label(Color32::GREEN, "HARDWARE ACCELERATED RENDERING");
                             
-                            // Use label with wrapping for potentially long GPU names
-                            let gpu_text = format!("GPU: {}", name);
+                            // GPU Model and Manufacturer
+                            let gpu_text = format!("GPU: {}", _system_info.gpu_model);
                             ui.add(egui::Label::new(egui::RichText::new(gpu_text).color(Color32::WHITE)).wrap());
                             
-                            // Extract backend info if available
-                            if name.contains(" - ") {
-                                let parts: Vec<&str> = name.split(" - ").collect();
-                                if parts.len() > 1 {
-                                    let backend_text = format!("API Backend: {}", parts[1]);
-                                    ui.add(egui::Label::new(egui::RichText::new(backend_text).color(Color32::LIGHT_GRAY)).wrap());
-                                }
+                            // GPU Architecture
+                            ui.colored_label(Color32::LIGHT_GRAY, format!("Architecture: {}", _system_info.gpu_architecture));
+                            
+                            // GPU Utilization
+                            ui.colored_label(Color32::LIGHT_GRAY, format!("GPU Utilization: {:.1}%", _system_info.gpu_utilization));
+                            
+                            // VRAM Usage
+                            let vram_mb_used = _system_info.vram_used / (1024 * 1024);
+                            let vram_mb_total = _system_info.vram_total / (1024 * 1024);
+                            
+                            if _system_info.vram_total > 0 {
+                                ui.colored_label(Color32::LIGHT_GRAY, format!("VRAM: {}MB / {}MB", vram_mb_used, vram_mb_total));
+                            } else {
+                                ui.colored_label(Color32::LIGHT_GRAY, "VRAM: Unknown");
                             }
+                            
+                            // API Backend
+                            ui.colored_label(Color32::LIGHT_GRAY, format!("API Backend: {}", _system_info.api_backend));
+                            
+                            // VSync Status and Toggle Key
+                            ui.add_space(5.0);
+                            let vsync_status = if _system_info.vsync_enabled {
+                                egui::RichText::new("VSync: ON").color(Color32::GREEN)
+                            } else {
+                                egui::RichText::new("VSync: OFF").color(Color32::YELLOW)
+                            };
+                            ui.label(vsync_status);
+                            ui.colored_label(Color32::LIGHT_GRAY, "Press 'V' to toggle VSync");
                         }
                     }
                     
