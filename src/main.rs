@@ -11,6 +11,7 @@ use winit::{
 use gpu_acceleration_test::{
     state::State,
     system_info::get_system_info,
+    device_selector::prompt_device_selection,
     WINDOW_TITLE,
     WINDOW_WIDTH,
     WINDOW_HEIGHT,
@@ -95,6 +96,21 @@ fn main() -> Result<()> {
     // Skip version logging since wgpu's API has changed
     log::info!("Starting application with wgpu and egui integration");
     
+    // Create wgpu instance for system info
+    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
+        backends: wgpu::Backends::all(),
+        ..Default::default()
+    });
+    
+    // Get system info for device selection
+    let mut system_info = get_system_info(&instance);
+    
+    // Prompt user to select a render device if multiple are available
+    let render_device = prompt_device_selection(&mut system_info);
+    
+    // Add logging for debugging render device configuration
+    log::debug!("Render device selected: {:?}", render_device);
+    
     // Create event loop
     let event_loop = EventLoop::new().unwrap();
     
@@ -106,21 +122,6 @@ fn main() -> Result<()> {
         .with_title(WINDOW_TITLE)
         .with_inner_size(winit::dpi::PhysicalSize::new(WINDOW_WIDTH, WINDOW_HEIGHT))
         .with_resizable(true);
-    
-    // Create wgpu instance for system info
-    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
-        backends: wgpu::Backends::all(),
-        ..Default::default()
-    });
-    
-    // Get system info for device selection
-    let system_info = get_system_info(&instance);
-    
-    // Select render device (default to first GPU)
-    let render_device = system_info.get_render_device();
-    
-    // Add logging for debugging render device configuration
-    log::debug!("Render device selected: {:?}", render_device);
     
     // Create our application handler
     let mut app = App {

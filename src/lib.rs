@@ -4,6 +4,7 @@ pub mod render_device;
 pub mod system_info;
 pub mod state;
 pub mod debug;
+pub mod device_selector;
 
 // Constants for the application
 pub const WINDOW_TITLE: &str = "Minecraft Block Renderer";
