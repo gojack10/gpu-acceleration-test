@@ -9,12 +9,15 @@ use winit::{
     keyboard::{KeyCode, PhysicalKey},
     event::ElementState,
 };
+#[cfg(not(target_arch = "wasm32"))]
 use egui;
 use log::debug;
 
 // For egui_wgpu_backend
+#[cfg(not(target_arch = "wasm32"))]
 use egui_wgpu_backend::{RenderPass, ScreenDescriptor};
 // For egui_winit
+#[cfg(not(target_arch = "wasm32"))]
 use egui_winit::State as EguiState;
 
 use crate::{
@@ -41,7 +44,9 @@ pub struct State {
     pub textures: Vec<Texture>,
     pub texture_bind_group: wgpu::BindGroup,
     pub depth_texture: Texture,
+    #[cfg(not(target_arch = "wasm32"))]
     pub egui_state: EguiState,
+    #[cfg(not(target_arch = "wasm32"))]
     pub egui_renderer: RenderPass,
     pub frame_times: Vec<f32>,
     pub fps: f32,
@@ -83,47 +88,52 @@ impl State {
         // Select the appropriate adapter based on rendering device
         let adapter = match &render_device {
             RenderDevice::CPU => {
-                instance
-                    .enumerate_adapters(wgpu::Backends::all())
-                    .into_iter()
-                    .filter(|adapter| {
-                        // Find CPU adapter (software rendering)
-                        adapter.get_info().device_type == wgpu::DeviceType::Cpu
+                // For CPU rendering, try to find a CPU adapter
+                let adapter_opt = pollster::block_on(
+                    instance.request_adapter(&wgpu::RequestAdapterOptions {
+                        power_preference: wgpu::PowerPreference::LowPower,
+                        compatible_surface: Some(&surface),
+                        force_fallback_adapter: true,
                     })
-                    .next()
-                    .or_else(|| {
-                        // Fallback to any adapter if no CPU found
-                        instance.enumerate_adapters(wgpu::Backends::all()).into_iter().next()
-                    })
-                    .unwrap()
+                );
+                
+                if adapter_opt.is_none() {
+                    // If no CPU adapter found, fall back to any adapter
+                    pollster::block_on(
+                        instance.request_adapter(&wgpu::RequestAdapterOptions {
+                            power_preference: wgpu::PowerPreference::LowPower,
+                            compatible_surface: Some(&surface),
+                            force_fallback_adapter: false,
+                        })
+                    )
+                } else {
+                    adapter_opt
+                }
             },
             RenderDevice::GPU(name) => {
-                // Try to find the specific GPU by name
-                let selected_gpu = instance
-                    .enumerate_adapters(wgpu::Backends::all())
-                    .into_iter()
-                    .find(|adapter| {
-                        let info = adapter.get_info();
-                        format!("{} - {}", info.name, info.backend.to_str()) == *name
-                    });
+                // For GPU rendering, try to find the specified GPU
+                let adapter_opt = pollster::block_on(
+                    instance.request_adapter(&wgpu::RequestAdapterOptions {
+                        power_preference: wgpu::PowerPreference::HighPerformance,
+                        compatible_surface: Some(&surface),
+                        force_fallback_adapter: false,
+                    })
+                );
                 
-                selected_gpu.unwrap_or_else(|| {
-                    // Fallback to any GPU adapter
-                    instance
-                        .enumerate_adapters(wgpu::Backends::all())
-                        .into_iter()
-                        .filter(|adapter| {
-                            adapter.get_info().device_type != wgpu::DeviceType::Cpu
+                if adapter_opt.is_none() {
+                    // If specified GPU not found, fall back to any adapter
+                    pollster::block_on(
+                        instance.request_adapter(&wgpu::RequestAdapterOptions {
+                            power_preference: wgpu::PowerPreference::HighPerformance,
+                            compatible_surface: Some(&surface),
+                            force_fallback_adapter: false,
                         })
-                        .next()
-                        .or_else(|| {
-                            // Final fallback to any adapter
-                            instance.enumerate_adapters(wgpu::Backends::all()).into_iter().next()
-                        })
-                        .unwrap()
-                })
+                    )
+                } else {
+                    adapter_opt
+                }
             }
-        };
+        }.expect("Failed to find an appropriate adapter");
         
         let adapter_info = adapter.get_info();
         debug!("Using adapter: {} ({})", adapter_info.name, adapter_info.backend.to_str());
@@ -352,9 +362,12 @@ impl State {
 
         let num_indices = indices.len() as u32;
 
+        #[cfg(not(target_arch = "wasm32"))]
         // Initialize egui
         let egui_context = egui::Context::default();
+        #[cfg(not(target_arch = "wasm32"))]
         let viewport_id = egui::ViewportId::default();
+        #[cfg(not(target_arch = "wasm32"))]
         let egui_state = EguiState::new(
             egui_context.clone(),
             viewport_id,
@@ -364,6 +377,7 @@ impl State {
             None,
         );
         
+        #[cfg(not(target_arch = "wasm32"))]
         // Initialize egui_wgpu_backend
         let egui_renderer = egui_wgpu_backend::RenderPass::new(
             &device,
@@ -430,7 +444,9 @@ impl State {
             textures: vec![block_texture],
             texture_bind_group,
             depth_texture,
+            #[cfg(not(target_arch = "wasm32"))]
             egui_state,
+            #[cfg(not(target_arch = "wasm32"))]
             egui_renderer,
             frame_times: vec![16.7; 30],
             fps: 60.0,
@@ -871,72 +887,75 @@ impl State {
             })
             .collect();
         
-        // Render egui UI
-        let screen_descriptor = ScreenDescriptor {
-            physical_width: self.config.width,
-            physical_height: self.config.height,
-            scale_factor: 1.0,
-        };
-        
-        let egui_context = self.egui_state.egui_ctx().clone();
-        
-        let raw_input = self.egui_state.take_egui_input(self.window.as_ref());
-        let full_output = egui_context.run(raw_input, |ctx| {
-            // Always render debug information using our debug state
-            // This will now show both text panels regardless of debug state
-            self.debug_state.render(
-                ctx,
-                self.fps,
-                &self.render_device,
-                &self.system_info,
-                (self.config.width, self.config.height),
-                self.rotation,
-                self.cube_position,
-                self.cube_velocity,
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            // Render egui UI
+            let screen_descriptor = ScreenDescriptor {
+                physical_width: self.config.width,
+                physical_height: self.config.height,
+                scale_factor: 1.0,
+            };
+            
+            let egui_context = self.egui_state.egui_ctx().clone();
+            
+            let raw_input = self.egui_state.take_egui_input(self.window.as_ref());
+            let full_output = egui_context.run(raw_input, |ctx| {
+                // Always render debug information using our debug state
+                // This will now show both text panels regardless of debug state
+                self.debug_state.render(
+                    ctx,
+                    self.fps,
+                    &self.render_device,
+                    &self.system_info,
+                    (self.config.width, self.config.height),
+                    self.rotation,
+                    self.cube_position,
+                    self.cube_velocity,
+                );
+            });
+            
+            // Handle egui output and render
+            self.egui_state.handle_platform_output(self.window.as_ref(), full_output.platform_output);
+            
+            // Check if shapes were actually generated
+            if full_output.shapes.is_empty() {
+                debug!("WARNING: No shapes generated by egui!");
+            }
+            
+            // Now tessellate the shapes into paint jobs
+            let paint_jobs = egui_context.tessellate(full_output.shapes, 1.0);
+            
+            // Update egui
+            self.egui_renderer.update_buffers(
+                &self.device,
+                &self.queue,
+                paint_jobs.as_slice(),
+                &screen_descriptor,
             );
-        });
-        
-        // Handle egui output and render
-        self.egui_state.handle_platform_output(self.window.as_ref(), full_output.platform_output);
-        
-        // Check if shapes were actually generated
-        if full_output.shapes.is_empty() {
-            debug!("WARNING: No shapes generated by egui!");
-        }
-        
-        // Now tessellate the shapes into paint jobs
-        let paint_jobs = egui_context.tessellate(full_output.shapes, 1.0);
-        
-        // Update egui
-        self.egui_renderer.update_buffers(
-            &self.device,
-            &self.queue,
-            paint_jobs.as_slice(),
-            &screen_descriptor,
-        );
-        
-        // Add textures from egui to the renderer
-        if let Err(e) = self.egui_renderer.add_textures(&self.device, &self.queue, &full_output.textures_delta) {
-            debug!("Failed to add textures to renderer: {:?}", e);
-        }
+            
+            // Add textures from egui to the renderer
+            if let Err(e) = self.egui_renderer.add_textures(&self.device, &self.queue, &full_output.textures_delta) {
+                debug!("Failed to add textures to renderer: {:?}", e);
+            }
 
-        // Render egui
-        let render_result = self.egui_renderer.execute(
-            &mut encoder,
-            &view,
-            paint_jobs.as_slice(),
-            &screen_descriptor,
-            None,
-        );
-        
-        // Just log errors, not success
-        if let Err(e) = &render_result {
-            debug!("Renderer execution failed: {:?}", e);
-        }
-        
-        // Free textures that are no longer needed
-        if let Err(e) = self.egui_renderer.remove_textures(full_output.textures_delta) {
-            debug!("Failed to remove textures from renderer: {:?}", e);
+            // Render egui
+            let render_result = self.egui_renderer.execute(
+                &mut encoder,
+                &view,
+                paint_jobs.as_slice(),
+                &screen_descriptor,
+                None,
+            );
+            
+            // Just log errors, not success
+            if let Err(e) = &render_result {
+                debug!("Renderer execution failed: {:?}", e);
+            }
+            
+            // Free textures that are no longer needed
+            if let Err(e) = self.egui_renderer.remove_textures(full_output.textures_delta) {
+                debug!("Failed to remove textures from renderer: {:?}", e);
+            }
         }
         
         // Submit command buffer
@@ -1308,7 +1327,7 @@ pub fn create_debug_axis_buffer(device: &wgpu::Device) -> wgpu::Buffer {
         // Fourth triangle
         Vertex { position: [0.0, -axis_thickness, axis_thickness], tex_coords: [1.0, 0.0], normal: [1.0, 0.0, 0.0] },
         Vertex { position: [1.0, axis_thickness, axis_thickness], tex_coords: [1.0, 0.0], normal: [1.0, 0.0, 0.0] },
-        Vertex { position: [0.0, axis_thickness, axis_thickness], tex_coords: [0.0, 1.0], normal: [0.0, 1.0, 0.0] },
+        Vertex { position: [axis_thickness, 0.0, axis_thickness], tex_coords: [0.0, 1.0], normal: [0.0, 1.0, 0.0] },
         
         // X-axis arrow tip (pyramid at the end)
         // First triangle (bottom face)
@@ -1376,44 +1395,28 @@ pub fn create_debug_axis_buffer(device: &wgpu::Device) -> wgpu::Buffer {
         // Z-axis (blue) - thicker line using two triangles
         // First triangle
         Vertex { position: [-axis_thickness, -axis_thickness, 0.0], tex_coords: [0.0, 0.0], normal: [0.0, 0.0, 1.0] },
-        Vertex { position: [-axis_thickness, -axis_thickness, 1.0], tex_coords: [0.0, 0.0], normal: [0.0, 0.0, 1.0] },
-        Vertex { position: [axis_thickness, -axis_thickness, 1.0], tex_coords: [0.0, 0.0], normal: [0.0, 0.0, 1.0] },
-        
         // Second triangle
         Vertex { position: [-axis_thickness, -axis_thickness, 0.0], tex_coords: [0.0, 0.0], normal: [0.0, 0.0, 1.0] },
         Vertex { position: [axis_thickness, -axis_thickness, 1.0], tex_coords: [0.0, 0.0], normal: [0.0, 0.0, 1.0] },
-        Vertex { position: [axis_thickness, -axis_thickness, 0.0], tex_coords: [0.0, 0.0], normal: [0.0, 0.0, 1.0] },
-        
         // Third triangle
         Vertex { position: [-axis_thickness, axis_thickness, 0.0], tex_coords: [0.0, 0.0], normal: [0.0, 0.0, 1.0] },
         Vertex { position: [-axis_thickness, axis_thickness, 1.0], tex_coords: [0.0, 0.0], normal: [0.0, 0.0, 1.0] },
         Vertex { position: [axis_thickness, axis_thickness, 1.0], tex_coords: [0.0, 0.0], normal: [0.0, 0.0, 1.0] },
-        
         // Fourth triangle
         Vertex { position: [-axis_thickness, axis_thickness, 0.0], tex_coords: [0.0, 0.0], normal: [0.0, 0.0, 1.0] },
         Vertex { position: [axis_thickness, axis_thickness, 1.0], tex_coords: [0.0, 0.0], normal: [0.0, 0.0, 1.0] },
         Vertex { position: [axis_thickness, axis_thickness, 0.0], tex_coords: [0.0, 0.0], normal: [0.0, 0.0, 1.0] },
-        
         // Z-axis arrow tip (pyramid at the end)
         // First triangle (bottom face)
         Vertex { position: [-axis_thickness, -axis_thickness, 1.0], tex_coords: [0.0, 0.0], normal: [0.0, 0.0, 1.0] },
-        Vertex { position: [-axis_thickness, axis_thickness, 1.0], tex_coords: [0.0, 0.0], normal: [0.0, 0.0, 1.0] },
-        Vertex { position: [0.0, 0.0, 1.0 + arrow_size], tex_coords: [0.0, 0.0], normal: [0.0, 0.0, 1.0] },
-        
         // Second triangle (top face)
         Vertex { position: [axis_thickness, -axis_thickness, 1.0], tex_coords: [0.0, 0.0], normal: [0.0, 0.0, 1.0] },
-        Vertex { position: [axis_thickness, axis_thickness, 1.0], tex_coords: [0.0, 0.0], normal: [0.0, 0.0, 1.0] },
-        Vertex { position: [0.0, 0.0, 1.0 + arrow_size], tex_coords: [0.0, 0.0], normal: [0.0, 0.0, 1.0] },
-        
         // Third triangle (left face)
         Vertex { position: [-axis_thickness, -axis_thickness, 1.0], tex_coords: [0.0, 0.0], normal: [0.0, 0.0, 1.0] },
-        Vertex { position: [axis_thickness, -axis_thickness, 1.0], tex_coords: [0.0, 0.0], normal: [0.0, 0.0, 1.0] },
-        Vertex { position: [0.0, 0.0, 1.0 + arrow_size], tex_coords: [0.0, 0.0], normal: [0.0, 0.0, 1.0] },
-        
         // Fourth triangle (right face)
         Vertex { position: [-axis_thickness, axis_thickness, 1.0], tex_coords: [0.0, 0.0], normal: [0.0, 0.0, 1.0] },
         Vertex { position: [axis_thickness, axis_thickness, 1.0], tex_coords: [0.0, 0.0], normal: [0.0, 0.0, 1.0] },
-        Vertex { position: [0.0, 0.0, 1.0 + arrow_size], tex_coords: [0.0, 0.0], normal: [0.0, 0.0, 1.0] },
+        Vertex { position: [axis_thickness, axis_thickness, 0.0], tex_coords: [0.0, 0.0], normal: [0.0, 0.0, 1.0] },
     ];
     
     device.create_buffer_init(&wgpu::util::BufferInitDescriptor {

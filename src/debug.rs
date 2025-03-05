@@ -1,3 +1,4 @@
+#[cfg(not(target_arch = "wasm32"))]
 use egui::{Color32, Align2, FontFamily, FontDefinitions, FontData};
 use winit::{
     event::WindowEvent,
@@ -6,10 +7,12 @@ use winit::{
 };
 use crate::render_device::RenderDevice;
 use crate::system_info::SystemInfo;
+#[cfg(not(target_arch = "wasm32"))]
 use sysinfo::{System, RefreshKind, CpuRefreshKind};
 use log::{info, debug};
 use std::time::Instant;
 use std::collections::BTreeMap;
+use glam::Vec3;
 
 
 // FONT SIZE CONFIGURATION
@@ -19,6 +22,7 @@ pub struct DebugState {
     pub enabled: bool,
     pub last_cpu_usage_check: Instant,
     pub cpu_usage: f32,
+    #[cfg(not(target_arch = "wasm32"))]
     pub system: System,
     pub font_loaded: bool,
     pub font_load_attempted: bool,
@@ -34,6 +38,7 @@ impl Default for DebugState {
             enabled: false,
             last_cpu_usage_check: Instant::now(),
             cpu_usage: 0.0,
+            #[cfg(not(target_arch = "wasm32"))]
             system: System::new_with_specifics(
                 RefreshKind::new().with_cpu(CpuRefreshKind::everything()),
             ),
@@ -88,8 +93,18 @@ impl DebugState {
         // CPU usage check - update every second
         let now = Instant::now();
         if now.duration_since(self.last_cpu_usage_check).as_secs_f32() >= 1.0 {
-            self.system.refresh_cpu();
-            self.cpu_usage = self.system.global_cpu_info().cpu_usage();
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                self.system.refresh_cpu();
+                self.cpu_usage = self.system.global_cpu_info().cpu_usage();
+            }
+            
+            #[cfg(target_arch = "wasm32")]
+            {
+                // For WASM, just use a placeholder value
+                self.cpu_usage = 5.0; // Placeholder value
+            }
+            
             self.last_cpu_usage_check = now;
             
             // Update system info if provided
@@ -125,6 +140,7 @@ impl DebugState {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn load_fonts(&mut self, ctx: &egui::Context) {
         if self.font_load_attempted && self.font_loaded {
             return;
@@ -140,61 +156,7 @@ impl DebugState {
         self.font_loaded = true;
     }
 
-    fn create_font_definitions(&self) -> FontDefinitions {
-        let mut font_data = BTreeMap::new();
-        let mut families = BTreeMap::new();
-        
-        // Try to load the font from the assets directory
-        match std::fs::read("assets/fonts/JetBrainsMono-Regular.ttf") {
-            Ok(font_data_bytes) => {
-                // Add the font to the font data map
-                font_data.insert("jetbrains_mono".to_owned(), FontData::from_owned(font_data_bytes));
-                
-                // Add the font to the proportional and monospace families
-                families.insert(
-                    FontFamily::Proportional,
-                    vec!["jetbrains_mono".to_owned()],
-                );
-                families.insert(
-                    FontFamily::Monospace,
-                    vec!["jetbrains_mono".to_owned()],
-                );
-            }
-            Err(err) => {
-                debug!("Failed to load font: {:?}", err);
-                
-                // Fall back to the default font
-                families.insert(
-                    FontFamily::Proportional,
-                    vec![egui::FontFamily::Name("sans-serif".into()).to_owned().to_string()],
-                );
-                families.insert(
-                    FontFamily::Monospace,
-                    vec![egui::FontFamily::Name("monospace".into()).to_owned().to_string()],
-                );
-            }
-        }
-        
-        let mut font_defs = FontDefinitions {
-            font_data,
-            families,
-            ..Default::default()
-        };
-        
-        // Make sure we have font sizes that work with different DPI scales
-        // This is crucial for the "No font size matching 1 pixels per point" error
-        for (_font_name, font_info) in font_defs.font_data.iter_mut() {
-            // Set tweak values to accommodate different DPI scales
-            font_info.tweak.scale = 1.0;
-            font_info.tweak.y_offset_factor = 0.0;
-            
-            // Note: oversample_height_in_pixels is not available in this version of egui
-            // Adjust this part based on your egui version
-        }
-        
-        font_defs
-    }
-
+    #[cfg(not(target_arch = "wasm32"))]
     fn configure_text_styles(&self, ctx: &egui::Context) {
         let pixels_per_point = ctx.pixels_per_point();
         
@@ -239,16 +201,17 @@ impl DebugState {
         ctx.set_style(style);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn render(
-        &mut self, 
-        ctx: &egui::Context, 
-        fps: f32, 
-        _render_device: &RenderDevice,
-        _system_info: &SystemInfo,
+        &mut self,
+        ctx: &egui::Context,
+        fps: f32,
+        render_device: &RenderDevice,
+        system_info: &SystemInfo,
         window_size: (u32, u32),
-        cube_rotation: f32,
-        cube_position: glam::Vec3,
-        cube_velocity: glam::Vec3,
+        rotation: f32,
+        position: Vec3,
+        velocity: Vec3,
     ) {
         self.fps = fps;
         self.frame_time = 1000.0 / fps;
@@ -330,29 +293,29 @@ impl DebugState {
                     // Add render device information with much more detail
                     ui.add_space(10.0);
                     
-                    match _render_device {
+                    match render_device {
                         RenderDevice::CPU => {
                             ui.colored_label(Color32::YELLOW, "CPU RENDERING (SOFTWARE)");
                             
                             // CPU Model and Manufacturer
-                            let cpu_model_text = format!("CPU: {}", _system_info.cpu_model);
+                            let cpu_model_text = format!("CPU: {}", system_info.cpu_model);
                             ui.add(egui::Label::new(egui::RichText::new(cpu_model_text).color(Color32::WHITE)).wrap());
                             
                             // CPU Architecture
-                            ui.colored_label(Color32::LIGHT_GRAY, format!("Architecture: {}", _system_info.cpu_architecture));
+                            ui.colored_label(Color32::LIGHT_GRAY, format!("Architecture: {}", system_info.cpu_architecture));
                             
                             // Software Renderer
                             ui.colored_label(Color32::LIGHT_GRAY, "Renderer: Software (CPU-based)");
                             
                             // Rendering Thread Count
-                            ui.colored_label(Color32::LIGHT_GRAY, format!("Rendering Threads: {}", _system_info.rendering_threads));
+                            ui.colored_label(Color32::LIGHT_GRAY, format!("Rendering Threads: {}", system_info.rendering_threads));
                             
                             // CPU Usage
-                            ui.colored_label(Color32::LIGHT_GRAY, format!("CPU Usage: {:.1}%", _system_info.cpu_usage));
+                            ui.colored_label(Color32::LIGHT_GRAY, format!("CPU Usage: {:.1}%", system_info.cpu_usage));
                             
                             // VSync Status and Toggle Key
                             ui.add_space(5.0);
-                            let vsync_status = if _system_info.vsync_enabled {
+                            let vsync_status = if system_info.vsync_enabled {
                                 egui::RichText::new("VSync: ON").color(Color32::GREEN)
                             } else {
                                 egui::RichText::new("VSync: OFF").color(Color32::YELLOW)
@@ -364,31 +327,31 @@ impl DebugState {
                             ui.colored_label(Color32::GREEN, "HARDWARE ACCELERATED RENDERING");
                             
                             // GPU Model and Manufacturer
-                            let gpu_text = format!("GPU: {}", _system_info.gpu_model);
+                            let gpu_text = format!("GPU: {}", system_info.gpu_model);
                             ui.add(egui::Label::new(egui::RichText::new(gpu_text).color(Color32::WHITE)).wrap());
                             
                             // GPU Architecture
-                            ui.colored_label(Color32::LIGHT_GRAY, format!("Architecture: {}", _system_info.gpu_architecture));
+                            ui.colored_label(Color32::LIGHT_GRAY, format!("Architecture: {}", system_info.gpu_architecture));
                             
                             // GPU Utilization
-                            ui.colored_label(Color32::LIGHT_GRAY, format!("GPU Utilization: {:.1}%", _system_info.gpu_utilization));
+                            ui.colored_label(Color32::LIGHT_GRAY, format!("GPU Utilization: {:.1}%", system_info.gpu_utilization));
                             
                             // VRAM Usage
-                            let vram_mb_used = _system_info.vram_used / (1024 * 1024);
-                            let vram_mb_total = _system_info.vram_total / (1024 * 1024);
+                            let vram_mb_used = system_info.vram_used / (1024 * 1024);
+                            let vram_mb_total = system_info.vram_total / (1024 * 1024);
                             
-                            if _system_info.vram_total > 0 {
+                            if system_info.vram_total > 0 {
                                 ui.colored_label(Color32::LIGHT_GRAY, format!("VRAM: {}MB / {}MB", vram_mb_used, vram_mb_total));
                             } else {
                                 ui.colored_label(Color32::LIGHT_GRAY, "VRAM: Unknown");
                             }
                             
                             // API Backend
-                            ui.colored_label(Color32::LIGHT_GRAY, format!("API Backend: {}", _system_info.api_backend));
+                            ui.colored_label(Color32::LIGHT_GRAY, format!("API Backend: {}", system_info.api_backend));
                             
                             // VSync Status and Toggle Key
                             ui.add_space(5.0);
-                            let vsync_status = if _system_info.vsync_enabled {
+                            let vsync_status = if system_info.vsync_enabled {
                                 egui::RichText::new("VSync: ON").color(Color32::GREEN)
                             } else {
                                 egui::RichText::new("VSync: OFF").color(Color32::YELLOW)
@@ -403,20 +366,35 @@ impl DebugState {
                     
                     // Cube information
                     ui.colored_label(Color32::WHITE, format!("Window Size: {}x{}", window_size.0, window_size.1));
-                    ui.colored_label(Color32::WHITE, format!("Cube Rotation: {:.2} rad", cube_rotation));
+                    ui.colored_label(Color32::WHITE, format!("Cube Rotation: {:.2} rad", rotation));
                     
                     // Use labels with wrapping for position and velocity
                     let pos_text = format!("Cube Position: ({:.2}, {:.2}, {:.2})", 
-                        cube_position.x, cube_position.y, cube_position.z);
+                        position.x, position.y, position.z);
                     ui.add(egui::Label::new(egui::RichText::new(pos_text).color(Color32::WHITE)).wrap());
                     
                     let vel_text = format!("Cube Velocity: ({:.2}, {:.2}, {:.2})", 
-                        cube_velocity.x, cube_velocity.y, cube_velocity.z);
+                        velocity.x, velocity.y, velocity.z);
                     ui.add(egui::Label::new(egui::RichText::new(vel_text).color(Color32::WHITE)).wrap());
                 });
             });
         
         // Restore original visuals
         ctx.set_visuals(ctx_visuals);
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    pub fn render(
+        &mut self,
+        _ctx: &(),
+        _fps: f32,
+        _render_device: &RenderDevice,
+        _system_info: &SystemInfo,
+        _window_size: (u32, u32),
+        _rotation: f32,
+        _position: Vec3,
+        _velocity: Vec3,
+    ) {
+        // No-op implementation for WebAssembly
     }
 } 

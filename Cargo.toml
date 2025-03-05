@@ -14,14 +14,17 @@ glam = "0.25.0"
 image = { version = "0.24.9", default-features = false, features = ["png"] }
 anyhow = "1.0.82"
 log = "0.4.21"
+futures = "0.3.30"
+num_cpus = "1.16.0"
+raw-window-handle = "0.5.2"
+
+# Non-web dependencies
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 env_logger = "0.10.2"
+sysinfo = "0.30.13"
 egui = "0.29.0"
 egui_wgpu_backend = "0.31.0"
 egui-winit = "0.29.0"
-raw-window-handle = "0.5.2"
-sysinfo = "0.30.13"
-futures = "0.3.30"
-num_cpus = "1.16.0"
 
 # Web-specific dependencies
 [target.'cfg(target_arch = "wasm32")'.dependencies]
@@ -76,8 +79,7 @@ web-sys = { version = "0.3.68", features = [
     "OffscreenCanvas",
     "OffscreenCanvasRenderingContext2d",
     "ResizeObserver",
-    "ResizeObserverEntry",
-    "AnimationFrameProvider",
+    "ResizeObserverEntry"
 ]}
 js-sys = "0.3.68"
 

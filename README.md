@@ -1,13 +1,13 @@
 # GPU Acceleration Test - WebGL Integration
 
-This project demonstrates a Minecraft block renderer using WebGL through WebAssembly. The application can run both as a native desktop application and as a web application in the browser.
+This project demonstrates GPU acceleration using WebGL through WebAssembly. The application can run both as a native desktop application and as a web application in the browser.
 
 ## Features
 
-- 3D rendering of Minecraft-style blocks
+- GPU-accelerated rendering
 - WebGL integration for browser support
-- Responsive canvas that adapts to the browser window
-- Simple UI controls for starting and stopping rendering
+- Cross-platform compatibility (desktop and web)
+- System information display (CPU/GPU)
 
 ## Prerequisites
 
@@ -30,7 +30,15 @@ This script will:
 
 ## Running the Web Application
 
-After building, you can serve the application using a simple HTTP server:
+After building, you can serve the application using the provided script:
+
+```bash
+./serve.sh
+```
+
+This will start a local HTTP server. Open your browser and navigate to http://localhost:8000.
+
+Alternatively, you can use any of these methods:
 
 ```bash
 # Using Python's built-in HTTP server
@@ -39,15 +47,6 @@ python -m http.server
 # Or using Node.js serve package
 npx serve
 ```
-
-Then open your browser and navigate to http://localhost:8000 (or the port shown in the terminal).
-
-## Usage
-
-1. Open the web page in your browser
-2. Wait for the WebAssembly module to load
-3. Click the "Start Rendering" button to begin rendering
-4. Click the "Stop Rendering" button to stop the render loop
 
 ## Building for Desktop
 
@@ -59,14 +58,35 @@ cargo run --release
 
 ## Project Structure
 
-- `src/web.rs` - WebAssembly bindings and web-specific code
+- `src/` - Main source code
+  - `src/web.rs` - WebAssembly bindings and web-specific code
+  - `src/state.rs` - Rendering state management
+  - `src/system_info.rs` - System information gathering
+  - `src/debug.rs` - Debug overlay and performance monitoring
 - `index.html` - HTML template for the web application
 - `build_wasm.sh` - Build script for WebAssembly
+- `serve.sh` - Script to start a local HTTP server
 - `pkg/` - Output directory for the WebAssembly build (created by build script)
 
 ## How It Works
 
-The application uses wgpu with the WebGL backend to render 3D graphics in the browser. The Rust code is compiled to WebAssembly and exposed to JavaScript through wasm-bindgen. The web page creates a canvas element and passes it to the WebAssembly module, which then initializes the renderer and starts the render loop.
+The application uses wgpu with the WebGL backend to render graphics in the browser. The Rust code is compiled to WebAssembly and exposed to JavaScript through wasm-bindgen. The web page creates a canvas element and passes it to the WebAssembly module, which then initializes the renderer and starts the render loop.
+
+For the desktop version, the application uses the native wgpu backend appropriate for the platform (Vulkan, Metal, DirectX, etc.).
+
+## WebAssembly Integration
+
+The WebAssembly integration is implemented through conditional compilation:
+
+```rust
+#[cfg(target_arch = "wasm32")]
+// Web-specific code
+
+#[cfg(not(target_arch = "wasm32"))]
+// Desktop-specific code
+```
+
+This allows the codebase to be shared between the web and desktop versions while handling platform-specific differences.
 
 ## Customization
 
