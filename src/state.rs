@@ -145,12 +145,27 @@ impl State {
             .find(|f| f.is_srgb())
             .unwrap_or(surface_caps.formats[0]);
             
+        // Select the appropriate present mode based on vsync setting
+        let present_mode = if system_info.vsync_enabled {
+            // VSync On - use Fifo (traditional vsync)
+            wgpu::PresentMode::Fifo
+        } else {
+            // VSync Off - try to use Immediate (no vsync) if supported, otherwise fall back to AutoNoVsync
+            if surface_caps.present_modes.contains(&wgpu::PresentMode::Immediate) {
+                wgpu::PresentMode::Immediate
+            } else {
+                wgpu::PresentMode::AutoNoVsync
+            }
+        };
+        
+        debug!("Using present mode: {:?} (vsync: {})", present_mode, system_info.vsync_enabled);
+            
         let config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
             format: surface_format,
             width: size.width,
             height: size.height,
-            present_mode: wgpu::PresentMode::Fifo,
+            present_mode,
             alpha_mode: wgpu::CompositeAlphaMode::Auto,
             view_formats: vec![],
             desired_maximum_frame_latency: 2,
@@ -428,6 +443,47 @@ impl State {
         }
     }
 
+    /// Toggle vsync on/off and reconfigure the surface
+    pub fn toggle_vsync(&mut self) {
+        // Toggle the vsync setting
+        self.system_info.vsync_enabled = !self.system_info.vsync_enabled;
+        
+        // Get the surface capabilities
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
+            backends: wgpu::Backends::all(),
+            ..Default::default()
+        });
+        
+        // Create a temporary adapter to get surface capabilities
+        let adapter = instance
+            .enumerate_adapters(wgpu::Backends::all())
+            .into_iter()
+            .next()
+            .unwrap();
+            
+        let surface_caps = self.surface.get_capabilities(&adapter);
+        
+        // Update the present mode based on the new vsync setting
+        self.config.present_mode = if self.system_info.vsync_enabled {
+            // VSync On - use Fifo (traditional vsync)
+            wgpu::PresentMode::Fifo
+        } else {
+            // VSync Off - try to use Immediate (no vsync) if supported, otherwise fall back to AutoNoVsync
+            if surface_caps.present_modes.contains(&wgpu::PresentMode::Immediate) {
+                wgpu::PresentMode::Immediate
+            } else {
+                wgpu::PresentMode::AutoNoVsync
+            }
+        };
+        
+        // Reconfigure the surface with the new settings
+        self.surface.configure(&self.device, &self.config);
+        
+        debug!("Toggled vsync: {} (present mode: {:?})", 
+               self.system_info.vsync_enabled, 
+               self.config.present_mode);
+    }
+
     pub fn input(&mut self, event: &WindowEvent) -> bool {
         // First check if debug state wants to handle this input
         debug!("State received window event: {:?}", event);
@@ -446,6 +502,18 @@ impl State {
                 ..
             } => {
                 // Handle space key
+                true
+            },
+            WindowEvent::KeyboardInput { 
+                event: winit::event::KeyEvent {
+                    physical_key: PhysicalKey::Code(KeyCode::KeyV),
+                    state: ElementState::Pressed,
+                    ..
+                },
+                ..
+            } => {
+                // Toggle vsync when V key is pressed
+                self.toggle_vsync();
                 true
             },
             WindowEvent::Resized(physical_size) => {

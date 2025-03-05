@@ -213,7 +213,7 @@ impl DebugState {
         ctx: &egui::Context, 
         fps: f32, 
         _render_device: &RenderDevice,
-        _system_info: &SystemInfo,
+        system_info: &SystemInfo,
         window_size: (u32, u32),
         cube_rotation: f32,
         cube_position: glam::Vec3,
@@ -296,15 +296,26 @@ impl DebugState {
                     ui.colored_label(Color32::WHITE, format!("FPS: {:.1}", self.fps));
                     ui.colored_label(Color32::WHITE, format!("Frame Time: {:.2} ms", self.frame_time));
                     
+                    // Show vsync status
+                    let vsync_status = if system_info.vsync_enabled {
+                        "VSync: ON (press V to toggle)"
+                    } else {
+                        "VSync: OFF (press V to toggle)"
+                    };
+                    ui.colored_label(
+                        if system_info.vsync_enabled { Color32::GREEN } else { Color32::YELLOW },
+                        vsync_status
+                    );
+                    
                     // Add render device information with much more detail
                     ui.add_space(10.0);
                     
                     match _render_device {
                         RenderDevice::CPU => {
                             ui.colored_label(Color32::YELLOW, "CPU RENDERING (SOFTWARE)");
-                            if !_system_info.cpus.is_empty() {
+                            if !system_info.cpus.is_empty() {
                                 // Use label with wrapping for potentially long CPU names
-                                let cpu_text = format!("CPU: {}", _system_info.cpus[_system_info.selected_cpu]);
+                                let cpu_text = format!("CPU: {}", system_info.cpus[system_info.selected_cpu]);
                                 ui.add(egui::Label::new(egui::RichText::new(cpu_text).color(Color32::WHITE)).wrap());
                             }
                         },

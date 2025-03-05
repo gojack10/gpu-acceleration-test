@@ -19,6 +19,7 @@ pub struct SystemInfo {
     pub vram_used: u64,
     pub vram_total: u64,
     pub api_backend: String,
+    pub vsync_enabled: bool,
 }
 
 impl SystemInfo {
@@ -157,6 +158,7 @@ pub fn get_system_info(instance: &wgpu::Instance) -> SystemInfo {
         vram_used: 0,         // Will need to be updated during runtime
         vram_total: 0,        // Will need to be updated during runtime
         api_backend,
+        vsync_enabled: true,  // Default to vsync enabled
     }
 }
 
