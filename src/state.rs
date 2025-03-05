@@ -448,32 +448,13 @@ impl State {
         // Toggle the vsync setting
         self.system_info.vsync_enabled = !self.system_info.vsync_enabled;
         
-        // Get the surface capabilities
-        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
-            backends: wgpu::Backends::all(),
-            ..Default::default()
-        });
-        
-        // Create a temporary adapter to get surface capabilities
-        let adapter = instance
-            .enumerate_adapters(wgpu::Backends::all())
-            .into_iter()
-            .next()
-            .unwrap();
-            
-        let surface_caps = self.surface.get_capabilities(&adapter);
-        
         // Update the present mode based on the new vsync setting
         self.config.present_mode = if self.system_info.vsync_enabled {
             // VSync On - use Fifo (traditional vsync)
             wgpu::PresentMode::Fifo
         } else {
-            // VSync Off - try to use Immediate (no vsync) if supported, otherwise fall back to AutoNoVsync
-            if surface_caps.present_modes.contains(&wgpu::PresentMode::Immediate) {
-                wgpu::PresentMode::Immediate
-            } else {
-                wgpu::PresentMode::AutoNoVsync
-            }
+            // VSync Off - use AutoNoVsync (safer option that works across all adapters)
+            wgpu::PresentMode::AutoNoVsync
         };
         
         // Reconfigure the surface with the new settings
