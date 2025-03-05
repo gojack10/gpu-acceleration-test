@@ -6,6 +6,9 @@ pub mod state;
 pub mod debug;
 pub mod device_selector;
 
+#[cfg(target_arch = "wasm32")]
+pub mod web;
+
 // Constants for the application
 pub const WINDOW_TITLE: &str = "Minecraft Block Renderer";
 pub const WINDOW_WIDTH: u32 = 1024;

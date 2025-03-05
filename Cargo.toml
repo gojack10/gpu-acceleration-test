@@ -7,11 +7,11 @@ edition = "2021"
 
 [dependencies]
 winit = "0.30.9"
-wgpu = "22.1.0"
+wgpu = { version = "22.1.0", features = ["webgl"] }
 pollster = "0.3.0"
 bytemuck = { version = "1.14.3", features = ["derive"] }
 glam = "0.25.0"
-image = "0.24.9"
+image = { version = "0.24.9", default-features = false, features = ["png"] }
 anyhow = "1.0.82"
 log = "0.4.21"
 env_logger = "0.10.2"
@@ -22,3 +22,69 @@ raw-window-handle = "0.5.2"
 sysinfo = "0.30.13"
 futures = "0.3.30"
 num_cpus = "1.16.0"
+
+# Web-specific dependencies
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+console_error_panic_hook = "0.1.7"
+console_log = "1.0.0"
+wasm-bindgen = "0.2.91"
+wasm-bindgen-futures = "0.4.41"
+web-sys = { version = "0.3.68", features = [
+    "Document",
+    "Window",
+    "Element",
+    "HtmlCanvasElement",
+    "WebGl2RenderingContext",
+    "Performance",
+    "PerformanceTiming",
+    "console",
+    "CssStyleDeclaration",
+    "DomRect",
+    "EventTarget",
+    "HtmlElement",
+    "MouseEvent",
+    "KeyboardEvent",
+    "WheelEvent",
+    "DomException",
+    "Location",
+    "Request",
+    "RequestInit",
+    "RequestMode",
+    "Response",
+    "Headers",
+    "Blob",
+    "BlobPropertyBag",
+    "Url",
+    "Worker",
+    "MessageEvent",
+    "DedicatedWorkerGlobalScope",
+    "ImageData",
+    "CanvasRenderingContext2d",
+    "HtmlImageElement",
+    "WebGlBuffer",
+    "WebGlProgram",
+    "WebGlShader",
+    "WebGlTexture",
+    "WebGlUniformLocation",
+    "WebGlVertexArrayObject",
+    "WebGlRenderingContext",
+    "WebGl2RenderingContext",
+    "AngleInstancedArrays",
+    "OesVertexArrayObject",
+    "WebGlFramebuffer",
+    "WebGlRenderbuffer",
+    "OffscreenCanvas",
+    "OffscreenCanvasRenderingContext2d",
+    "ResizeObserver",
+    "ResizeObserverEntry",
+    "AnimationFrameProvider",
+]}
+js-sys = "0.3.68"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
