@@ -7,7 +7,7 @@ use winit::{
 use crate::render_device::RenderDevice;
 use crate::system_info::SystemInfo;
 use sysinfo::{System, RefreshKind, CpuRefreshKind};
-use log::info;
+use log::{info, debug};
 use std::time::Instant;
 use std::collections::BTreeMap;
 
@@ -99,8 +99,6 @@ impl DebugState {
             return;
         }
         
-        println!("Attempting to load fonts. Previous attempt: {}", self.font_load_attempted);
-        
         self.font_load_attempted = true;
         
         let font_definitions = self.create_font_definitions();
@@ -109,20 +107,15 @@ impl DebugState {
         self.configure_text_styles(ctx);
         
         self.font_loaded = true;
-        println!("Fonts loaded successfully");
     }
 
     fn create_font_definitions(&self) -> FontDefinitions {
-        println!("Creating font definitions");
-        
         let mut font_data = BTreeMap::new();
         let mut families = BTreeMap::new();
         
         // Try to load the font from the assets directory
         match std::fs::read("assets/fonts/JetBrainsMono-Regular.ttf") {
             Ok(font_data_bytes) => {
-                println!("Successfully read font data, {} bytes", font_data_bytes.len());
-                
                 // Add the font to the font data map
                 font_data.insert("jetbrains_mono".to_owned(), FontData::from_owned(font_data_bytes));
                 
@@ -137,7 +130,7 @@ impl DebugState {
                 );
             }
             Err(err) => {
-                println!("Failed to load font: {:?}", err);
+                debug!("Failed to load font: {:?}", err);
                 
                 // Fall back to the default font
                 families.insert(
@@ -168,14 +161,11 @@ impl DebugState {
             // Adjust this part based on your egui version
         }
         
-        println!("Font definitions created with {} fonts", font_defs.font_data.len());
-        
         font_defs
     }
 
     fn configure_text_styles(&self, ctx: &egui::Context) {
         let pixels_per_point = ctx.pixels_per_point();
-        println!("Configuring text styles with pixel scale: {:.3}", pixels_per_point);
         
         // Calculate font sizes based on scale factor to ensure readability
         // Base sizes are for 1.0 scale factor
@@ -199,14 +189,8 @@ impl DebugState {
         let button_size = (base_button_size * scale_multiplier).max(min_font_size);
         let small_size = (base_small_size * scale_multiplier).max(min_font_size);
         
-        println!("Font sizes after scaling - Heading: {:.1}, Body: {:.1}, Mono: {:.1}, Button: {:.1}, Small: {:.1}",
-            heading_size, body_size, mono_size, button_size, small_size);
-        
         // Log the available text styles
         let mut style = (*ctx.style()).clone();
-        for (text_style, font_id) in style.text_styles.iter() {
-            println!("Text style: {:?}, Font size: {}", text_style, font_id.size);
-        }
         
         // Create a map of text styles to font ids
         style.text_styles = [
@@ -222,8 +206,6 @@ impl DebugState {
         
         // Set the style to the context
         ctx.set_style(style);
-        
-        println!("Text styles configured successfully");
     }
 
     pub fn render(
