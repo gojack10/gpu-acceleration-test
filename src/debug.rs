@@ -11,6 +11,10 @@ use log::info;
 use std::time::Instant;
 use std::collections::BTreeMap;
 
+
+// FONT SIZE CONFIGURATION
+const DEBUG_FONT_SIZE: f32 = 22.0;
+
 pub struct DebugState {
     pub enabled: bool,
     pub last_cpu_usage_check: Instant,
@@ -262,8 +266,8 @@ impl DebugState {
             self.load_fonts(ctx);
         }
         
-        // Create a consistent font to use throughout the UI - always size 14
-        let font_id = egui::FontId::new(14.0, egui::FontFamily::Proportional);
+        // Create a consistent font using the global font size variable
+        let font_id = egui::FontId::new(DEBUG_FONT_SIZE, egui::FontFamily::Proportional);
         
         // Use transparent background for all windows
         let ctx_visuals = ctx.style().visuals.clone();
@@ -282,31 +286,16 @@ impl DebugState {
         transparent_visuals.widgets.active.bg_fill = Color32::from_rgba_premultiplied(255, 255, 255, 20);
         ctx.set_visuals(transparent_visuals);
         
-        // Right-aligned window (always visible)
-        egui::Window::new("Info")
-            .title_bar(false)
-            .resizable(false)
-            .anchor(Align2::RIGHT_TOP, egui::Vec2::new(-10.0, 10.0))
-            .frame(egui::Frame::none())
-            .show(ctx, |ui| {
-                ui.with_layout(egui::Layout::top_down(egui::Align::RIGHT), |ui| {
-                    // Apply consistent styling
-                    ui.style_mut().override_font_id = Some(font_id.clone());
-                    ui.style_mut().visuals.override_text_color = Some(Color32::WHITE);
-                    
-                    ui.colored_label(Color32::WHITE, format!("Window Size: {}x{}", window_size.0, window_size.1));
-                    ui.colored_label(Color32::WHITE, format!("Cube Rotation: {:.2} rad", cube_rotation));
-                    ui.colored_label(Color32::WHITE, format!("Cube Position: ({:.2}, {:.2}, {:.2})", 
-                        cube_position.x, cube_position.y, cube_position.z));
-                    ui.colored_label(Color32::WHITE, format!("Cube Velocity: ({:.2}, {:.2}, {:.2})", 
-                        cube_velocity.x, cube_velocity.y, cube_velocity.z));
-                });
-            });
-
-        // Left-aligned window (always visible)
+        // Calculate a reasonable max width based on window size
+        // Use at most 40% of window width, but not less than 200px and not more than 400px
+        let max_width = ((window_size.0 as f32) * 0.4).max(200.0).min(400.0);
+        
+        // Single left-aligned window with all information
         egui::Window::new("Stats")
             .title_bar(false)
-            .resizable(false)
+            .resizable(true)  // Allow resizing
+            .default_width(max_width) // Set default width
+            .min_width(150.0) // Set minimum width to prevent too narrow window
             .anchor(Align2::LEFT_TOP, egui::Vec2::new(10.0, 10.0))
             .frame(egui::Frame::none())
             .show(ctx, |ui| {
@@ -314,9 +303,63 @@ impl DebugState {
                 ui.style_mut().override_font_id = Some(font_id.clone());
                 ui.style_mut().visuals.override_text_color = Some(Color32::WHITE);
                 
-                ui.colored_label(Color32::WHITE, format!("FPS: {:.1}", self.fps));
-                ui.colored_label(Color32::WHITE, format!("Frame Time: {:.2} ms", self.frame_time));
-                ui.colored_label(Color32::WHITE, format!("DPI Scale: {:.2}", current_scale_factor));
+                // Set text wrapping
+                ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
+                
+                // Use vertical layout with auto-width
+                ui.vertical(|ui| {
+                    ui.set_max_width(max_width);
+                    
+                    // Performance stats
+                    ui.colored_label(Color32::WHITE, format!("FPS: {:.1}", self.fps));
+                    ui.colored_label(Color32::WHITE, format!("Frame Time: {:.2} ms", self.frame_time));
+                    
+                    // Add render device information with much more detail
+                    ui.add_space(10.0);
+                    
+                    match _render_device {
+                        RenderDevice::CPU => {
+                            ui.colored_label(Color32::YELLOW, "CPU RENDERING (SOFTWARE)");
+                            if !_system_info.cpus.is_empty() {
+                                // Use label with wrapping for potentially long CPU names
+                                let cpu_text = format!("CPU: {}", _system_info.cpus[_system_info.selected_cpu]);
+                                ui.add(egui::Label::new(egui::RichText::new(cpu_text).color(Color32::WHITE)).wrap());
+                            }
+                        },
+                        RenderDevice::GPU(name) => {
+                            ui.colored_label(Color32::GREEN, "HARDWARE ACCELERATED RENDERING");
+                            
+                            // Use label with wrapping for potentially long GPU names
+                            let gpu_text = format!("GPU: {}", name);
+                            ui.add(egui::Label::new(egui::RichText::new(gpu_text).color(Color32::WHITE)).wrap());
+                            
+                            // Extract backend info if available
+                            if name.contains(" - ") {
+                                let parts: Vec<&str> = name.split(" - ").collect();
+                                if parts.len() > 1 {
+                                    let backend_text = format!("API Backend: {}", parts[1]);
+                                    ui.add(egui::Label::new(egui::RichText::new(backend_text).color(Color32::LIGHT_GRAY)).wrap());
+                                }
+                            }
+                        }
+                    }
+                    
+                    // Add spacing between render device info and cube info
+                    ui.add_space(10.0);
+                    
+                    // Cube information
+                    ui.colored_label(Color32::WHITE, format!("Window Size: {}x{}", window_size.0, window_size.1));
+                    ui.colored_label(Color32::WHITE, format!("Cube Rotation: {:.2} rad", cube_rotation));
+                    
+                    // Use labels with wrapping for position and velocity
+                    let pos_text = format!("Cube Position: ({:.2}, {:.2}, {:.2})", 
+                        cube_position.x, cube_position.y, cube_position.z);
+                    ui.add(egui::Label::new(egui::RichText::new(pos_text).color(Color32::WHITE)).wrap());
+                    
+                    let vel_text = format!("Cube Velocity: ({:.2}, {:.2}, {:.2})", 
+                        cube_velocity.x, cube_velocity.y, cube_velocity.z);
+                    ui.add(egui::Label::new(egui::RichText::new(vel_text).color(Color32::WHITE)).wrap());
+                });
             });
         
         // Restore original visuals
